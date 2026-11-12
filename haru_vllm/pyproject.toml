@@ -1,15 +1,22 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "haru-vllm"
+name = "haru-speech-vllm"
 description = "Serve Haru with vLLM-Omni"
 readme = "README.md"
 license = "Apache-2.0"
+authors = [{ name = "higurashi" }]
 requires-python = ">=3.11"
 dynamic = ["version"]
-dependencies = ["haru", "vllm>=0.33", "vllm-omni"]
+dependencies = ["haru-speech", "vllm>=0.33", "vllm-omni"]
+
+[project.urls]
+Homepage = "https://higurashi.ai"
+Repository = "https://github.com/higurashi-ai/Haru"
+Issues = "https://github.com/higurashi-ai/Haru/issues"
+Model = "https://huggingface.co/higurashi-ai/Haru-4B"
 
 # vLLM loads this group in the API server and in every engine worker.
 [project.entry-points."vllm.general_plugins"]

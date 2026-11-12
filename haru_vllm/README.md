@@ -1,5 +1,7 @@
 # haru_vllm
 
+<!-- This README is also the project description on PyPI, where relative links do not resolve. Link to other files in the repository with absolute GitHub URLs. -->
+
 Serve Haru with [vLLM-Omni](https://github.com/vllm-project/vllm-omni): many
 concurrent full-duplex conversations on one GPU, over the realtime WebSocket
 API.
@@ -24,7 +26,7 @@ python -m haru.server --backend vllm --vllm-url http://localhost:8000
 ```
 
 `python -m haru_vllm.deploy` prints the path of the bundled deploy
-configuration ([`deploy/haru.yaml`](haru_vllm/deploy/haru.yaml)). Copy and edit
+configuration ([`deploy/haru.yaml`](https://github.com/higurashi-ai/Haru/blob/main/haru_vllm/haru_vllm/deploy/haru.yaml)). Copy and edit
 it to change the number of concurrent conversations (`duplex_session.max_sessions`
 and `max_num_seqs`) or the cache size.
 

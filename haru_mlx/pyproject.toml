@@ -1,12 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "haru_mlx"
+name = "haru-speech-mlx"
 description = "Haru on Apple silicon: the MLX implementation of the full-duplex speech language model"
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "higurashi" }]
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
@@ -17,6 +19,12 @@ dependencies = [
     "scipy>=1.13",
     "soundfile>=0.13",
 ]
+
+[project.urls]
+Homepage = "https://higurashi.ai"
+Repository = "https://github.com/higurashi-ai/Haru"
+Issues = "https://github.com/higurashi-ai/Haru/issues"
+Model = "https://huggingface.co/higurashi-ai/Haru-4B"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

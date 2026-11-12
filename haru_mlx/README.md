@@ -1,5 +1,7 @@
 # haru_mlx
 
+<!-- This README is also the project description on PyPI, where relative links do not resolve. Link to other files in the repository with absolute GitHub URLs. -->
+
 Haru on Apple silicon: the [MLX](https://github.com/ml-explore/mlx)
 implementation of the Haru full-duplex speech language model. It loads the
 same checkpoint as the PyTorch package `haru` (`higurashi-ai/Haru-4B`) and has
@@ -19,7 +21,7 @@ about 10 GB; it is downloaded from Hugging Face on first use.
 
 ## Talk to it
 
-**[Haru for macOS](swift/README.md)** is the way to talk to the model on a
+**[Haru for macOS](https://github.com/higurashi-ai/Haru/blob/main/haru_mlx/swift/README.md)** is the way to talk to the model on a
 Mac: a native app that handles the microphone and speakers with Core Audio and
 runs this package as its model server. Build it with `swift/build_app.sh`.
 
@@ -106,5 +108,5 @@ pytest                                   # the tests that need no checkpoint
 HARU_MODEL=/path/to/Haru-4B pytest       # + checkpoint coverage and a short conversation
 ```
 
-Most tests run without MLX. [`tests/README.md`](tests/README.md) describes the
+Most tests run without MLX. [`tests/README.md`](https://github.com/higurashi-ai/Haru/blob/main/haru_mlx/tests/README.md) describes the
 numerical comparison with the PyTorch package and the checks to run on a Mac.

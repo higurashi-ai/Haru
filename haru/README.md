@@ -1,5 +1,7 @@
 # haru
 
+<!-- This README is also the project description on PyPI, where relative links do not resolve. Link to other files in the repository with absolute GitHub URLs. -->
+
 The PyTorch implementation of Haru, a full-duplex speech language model, with
 a web demo server and an offline inference command.
 
@@ -45,7 +47,7 @@ The first use in a new environment compiles the kernels (about 15 seconds).
 | `haru.server`, `haru.webrtc`, `haru.backends` | The web demo |
 | `haru.run_inference` | Offline: a recording in, the model's side of the conversation out |
 
-See the [repository README](../README.md) for the Python API.
+See the [repository README](https://github.com/higurashi-ai/Haru/blob/main/README.md#python) for the Python API.
 
 ## Tests
 

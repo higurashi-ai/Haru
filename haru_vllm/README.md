@@ -64,4 +64,7 @@ request whose prompt grows by one position per frame; the language model runs
 on vLLM's engine (paged attention cache, Gated DeltaNet state, CUDA graphs).
 The audio parts run in model hooks of the same step: the user frame is encoded
 before the forward pass, and the MeanFlow head and codec decoder run right
-after sampling, so a frame's audio leaves in the step that produced it.
+after sampling, so a frame's audio leaves in the step that produced it. The
+codec runs as Triton kernels replayed from CUDA graphs when `triton` is
+installed (PyTorch's Linux CUDA wheels install it), and in plain PyTorch
+otherwise.

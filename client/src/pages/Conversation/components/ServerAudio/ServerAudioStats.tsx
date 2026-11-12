@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { AudioStats } from "../../hooks/useServerAudio";
 import { useSocketContext } from "../../SocketContext";
+import { useT } from "../../../../i18n";
 
 type ServerAudioStatsProps = {
   getAudioStats: React.MutableRefObject<() => AudioStats>;
@@ -42,6 +43,7 @@ export const Stat = ({ label, value, big }: { label: string; value: string; big?
 );
 
 export const ServerAudioStats = ({ getAudioStats, sessionId }: ServerAudioStatsProps) => {
+  const t = useT();
   const [audioStats, setAudioStats] = useState(getAudioStats.current());
   const { isConnected } = useSocketContext();
 
@@ -127,11 +129,11 @@ export const ServerAudioStats = ({ getAudioStats, sessionId }: ServerAudioStatsP
   const ms = (seconds: number) => `${Math.round(seconds * 1000)} ms`;
   return (
     <div className="flex flex-wrap items-end gap-x-7 gap-y-3 rounded-[18px] bg-card p-[18px]">
-      <Stat big label="応答の遅延" value={Number.isFinite(latency) && latency > 0 ? ms(latency) : "—"} />
-      <Stat label="再生済み" value={convertMinSecs(audioStats.playedAudioDuration)} />
-      <Stat label="欠落" value={convertMinSecs(audioStats.missedAudioDuration)} />
-      <Stat label="マイク → 出力デバイス" value={`${ms(audioStats.captureSeconds ?? 0)} → ${ms(audioStats.playoutDeviceSeconds ?? 0)}`} />
-      <Stat label="バッファ（最小 / 最大）" value={audioStats.minPlaybackDelay <= audioStats.maxPlaybackDelay ? `${ms(audioStats.minPlaybackDelay)} / ${ms(audioStats.maxPlaybackDelay)}` : "—"} />
+      <Stat big label={t("stats.latency")} value={Number.isFinite(latency) && latency > 0 ? ms(latency) : "—"} />
+      <Stat label={t("stats.played")} value={convertMinSecs(audioStats.playedAudioDuration)} />
+      <Stat label={t("stats.missed")} value={convertMinSecs(audioStats.missedAudioDuration)} />
+      <Stat label={t("stats.devices")} value={`${ms(audioStats.captureSeconds ?? 0)} → ${ms(audioStats.playoutDeviceSeconds ?? 0)}`} />
+      <Stat label={t("stats.buffer")} value={audioStats.minPlaybackDelay <= audioStats.maxPlaybackDelay ? `${ms(audioStats.minPlaybackDelay)} / ${ms(audioStats.maxPlaybackDelay)}` : "—"} />
     </div>
   );
 };

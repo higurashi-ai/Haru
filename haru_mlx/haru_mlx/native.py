@@ -340,9 +340,9 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--model", help="checkpoint directory")
     source.add_argument("--hf-repo", help=f"Hugging Face repository (default: {DEFAULT_REPO})")
     parser.add_argument(
-        "--quantize", choices=("8", "none"), default="8",
-        help="'8' stores the backbone with 8 bits per weight (a frame is faster and the model smaller); "
-        "'none' keeps the checkpoint's bfloat16",
+        "--quantize", choices=("8", "none"), default="none",
+        help="'none' keeps the checkpoint's bfloat16; '8' stores the backbone with 8 bits per weight "
+        "(a frame is faster and the model smaller)",
     )
     parser.add_argument("--socket", default=default_socket(), help="default: haru.sock in the temporary directory")
     parser.add_argument("--language", default="ja", help="language of the default card and voice")

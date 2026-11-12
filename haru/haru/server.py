@@ -64,7 +64,6 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_STORED = 32  # uploaded voices and registered sessions kept in memory
 CLIENT_SILENCE_SECONDS = 15  # WebSocket: close when the microphone stream stops for this long
 RTC_CONNECT_SECONDS = 45.0  # a peer that never connects must not keep its slot
-PRESET_LABELS = {"chat": "初対面の雑談"}
 
 # Buffering for the path between browser and server. "client" is sent to the
 # browser (WebSocket playout queue, microphone page size); "playout" and
@@ -120,7 +119,7 @@ class ServerOptions:
     static_dir: Path | None = None  # built web client; default: the bundled one
     max_sessions: int = 1
     time_limit_seconds: int = 3600
-    default_language: str = "ja"
+    default_language: str = "en"
     temperature: float = 0.7
     top_k: int = 25
     seed: int | None = None
@@ -147,17 +146,16 @@ class DemoAssets:
         self.voices: dict[str, np.ndarray] = {}
         for code in (entry["code"] for entry in self.languages):
             cards = json.loads((root / "cards" / f"{code}.json").read_text(encoding="utf-8"))
-            self.presets[code] = [
-                {"id": key, "label": PRESET_LABELS.get(key, key), "card": card} for key, card in cards.items()
-            ]
+            self.presets[code] = [{"id": key, "card": card} for key, card in cards.items()]
             voice = root / "voices" / f"{code}.flac"
             if voice.is_file():
                 self.voice_files[code] = voice
                 self.voices[code] = prepare_reference(decode_audio(voice.read_bytes()), REFERENCE_MAX_SECONDS)
 
 
-def _text_error(status: int, message: str) -> web.Response:
-    return web.Response(status=status, text=message)
+def _error(status: int, code: str, message: str, **params: Any) -> web.Response:
+    """An error for the setup page: it translates ``code`` (with ``params``) and falls back to ``error``."""
+    return web.json_response({"code": code, "error": message, **params}, status=status)
 
 
 class DemoServer:
@@ -266,7 +264,6 @@ class DemoServer:
             "default_references": {
                 code: {
                     "id": self._default_reference_id(code),
-                    "name": "デフォルト音声",
                     "seconds": round(len(voice) / SAMPLE_RATE, 2),
                     "trimmed": False,
                     "preview_url": f"/api/default_reference?lang={code}",
@@ -292,17 +289,18 @@ class DemoServer:
         """Store an uploaded or recorded voice (any audio file as the body); returns its id."""
         body = await request.read()
         if not body:
-            return _text_error(400, "empty upload")
+            return _error(400, "empty_upload", "The upload is empty.")
         try:
             audio = await asyncio.to_thread(decode_audio, body)
         except Exception:
-            return _text_error(400, "音声ファイルを読み込めませんでした。")
+            return _error(400, "unreadable_audio", "The audio file could not be read.")
         audio = trim_silence(audio)
         seconds = len(audio) / SAMPLE_RATE
         if seconds < REFERENCE_MIN_SECONDS:
-            return _text_error(
-                400,
-                f"音声が短すぎます（無音除去後 {seconds:.1f} 秒）。{REFERENCE_MIN_SECONDS:g} 秒以上の発話を用意してください。",
+            return _error(
+                400, "audio_too_short",
+                f"The audio has only {seconds:.1f} s of speech; at least {REFERENCE_MIN_SECONDS:g} s is needed.",
+                seconds=round(seconds, 1), min_seconds=REFERENCE_MIN_SECONDS,
             )
         limit = int(REFERENCE_MAX_SECONDS * SAMPLE_RATE)
         trimmed = len(audio) > limit
@@ -320,15 +318,19 @@ class DemoServer:
         except ValueError:
             body = None
         if not isinstance(body, dict):
-            return _text_error(400, "invalid JSON")
+            return _error(400, "invalid_json", "The request body is not a JSON object.")
         system_prompt = str(body.get("system_prompt") or "").strip()
         if not system_prompt:
-            return _text_error(400, "システムプロンプトを入力してください。")
+            return _error(400, "prompt_empty", "The system prompt is empty.")
         if len(system_prompt) > SYSTEM_PROMPT_MAX_CHARS:
-            return _text_error(400, f"システムプロンプトは {SYSTEM_PROMPT_MAX_CHARS} 文字以内にしてください。")
+            return _error(
+                400, "prompt_too_long",
+                f"The system prompt is longer than {SYSTEM_PROMPT_MAX_CHARS} characters.",
+                max_chars=SYSTEM_PROMPT_MAX_CHARS,
+            )
         reference = self._reference(str(body.get("reference_audio_id") or ""))
         if reference is None:
-            return _text_error(404, "参照音声が見つかりません。もう一度アップロードまたは録音してください。")
+            return _error(404, "reference_not_found", "The reference audio was not found; upload or record it again.")
         try:
             guidance_scale = float(body.get("guidance_scale", DEFAULT_GUIDANCE_SCALE))
         except (TypeError, ValueError):
@@ -393,9 +395,9 @@ class DemoServer:
             return ws
 
         if settings is None:
-            return await fail("セッションが見つかりません。ページを再読み込みしてやり直してください。")
+            return await fail("Session not found; reload the page and try again.")
         if not self.backend.ready():
-            return await fail("モデルを読み込み中です。")
+            return await fail("The model is still loading.")
         async with self.slots:
             if ws.closed:
                 return ws
@@ -483,7 +485,7 @@ class DemoServer:
         session_id = request.query.get("session_id", "")
         settings = self.sessions.get(session_id)
         if settings is None or not self.backend.ready():
-            return web.json_response({"error": "セッションが見つからないか、モデルを読み込み中です。"}, status=404)
+            return web.json_response({"error": "Session not found, or the model is still loading."}, status=404)
         try:
             offer = await request.json()
         except ValueError:
@@ -580,7 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--static", type=Path, help="directory of a built web client (default: the bundled one)")
     parser.add_argument("--max-sessions", type=int, default=1, help="conversations that may run at the same time; others wait")
     parser.add_argument("--time-limit", type=int, default=3600, help="longest conversation, in seconds")
-    parser.add_argument("--language", default="ja", help="language preselected in the client")
+    parser.add_argument("--language", default="en", help="language preselected in the client on a first visit")
     parser.add_argument("--temperature", type=float, default=0.7, help="text sampling temperature")
     parser.add_argument("--top-k", type=int, default=25, help="text sampling top-k")
     parser.add_argument("--seed", type=int, help="fixed sampling seed for every conversation")

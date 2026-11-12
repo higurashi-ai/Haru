@@ -7,9 +7,7 @@ HARU_MODEL=/path/to/Haru-4B pytest       # + checkpoint coverage and a short con
 
 | File | Needs |
 |---|---|
-| `test_sampling.py`, `test_prompt.py`, `test_audio.py`, `test_playout.py`, `test_weights.py`, `test_imports.py` | nothing (two tests in sampling / prompt need MLX) |
-| `test_server.py` | `aiohttp`, `sphn`; skipped while the default voices are not in `haru_mlx/assets/voices` |
-| `test_webrtc.py` | the `webrtc` extra |
+| `test_sampling.py`, `test_prompt.py`, `test_audio.py`, `test_weights.py`, `test_imports.py` | nothing (two tests in sampling / prompt need MLX) |
 | `test_shared_code.py` | the PyTorch package `haru` importable (its source is compared, not run) |
 | `test_model.py` | MLX; the conversation tests also need `HARU_MODEL` |
 | `test_parity.py` | MLX, `HARU_MODEL`, `HARU_REFERENCE` |
@@ -46,8 +44,8 @@ which takes the array fallbacks instead of the Metal kernels:
 - the 8-bit backbone against float32 PyTorch: hidden states 9e-2 and the same
   text tokens, the level of the bfloat16 checkpoint (4-bit weights were tried
   and rejected: hidden states off by about 100 %);
-- the commands end to end with the tiny checkpoint: `run_inference`, the web
-  server over its WebSocket, the native socket server.
+- the commands end to end with the tiny checkpoint: `run_inference` and the
+  native socket server.
 
 Not yet run on a Mac. Checklist:
 
@@ -63,14 +61,7 @@ Not yet run on a Mac. Checklist:
    reply must sound right.
 5. Memory: peak while loading and resident while talking, for each
    `--quantize` setting, on a 16 GB machine.
-6. `python -m haru_mlx.local --reference voice.wav` (needs the `local`
-   extra): a conversation with headphones; note the printed latency and
-   underruns.
-7. `python -m haru_mlx.server`, then http://localhost:8998 : a conversation
-   over the WebSocket, and with `--webrtc on` over WebRTC (needs the web
-   client in `haru_mlx/static` and the default voices in
-   `haru_mlx/assets/voices`).
-8. `swift/build_app.sh`, then `swift/build/Haru.app`: the app starts
+6. `swift/build_app.sh`, then `swift/build/Haru.app`: the app starts
    `python -m haru_mlx.native`, the example cards and voices load, a
    conversation runs, the precision switch reloads the model; and
    `swift/.build/haru-client` against a server started by hand.

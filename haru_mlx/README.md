@@ -12,8 +12,6 @@ your audio and produces one frame of its own speech together with its text.
 
 ```bash
 pip install -e .                 # from this directory
-pip install -e ".[local]"        # + microphone / speaker client
-pip install -e ".[webrtc]"       # + WebRTC transport of the web demo
 ```
 
 Requires a Mac with Apple silicon and Python 3.10 or later. The checkpoint is
@@ -21,29 +19,32 @@ about 10 GB; it is downloaded from Hugging Face on first use.
 
 ## Talk to it
 
+**[Haru for macOS](swift/README.md)** is the way to talk to the model on a
+Mac: a native app that handles the microphone and speakers with Core Audio and
+runs this package as its model server. Build it with `swift/build_app.sh`.
+
+Haru ships without voice clips: in the app, choose or record a clip of the
+voice the model should speak with (one speaker, 3 seconds to 3 minutes). Only
+use voices you have the right to use.
+
+## Offline
+
 ```bash
-python -m haru_mlx.local --language en --reference voice.wav   # terminal: your microphone and speakers
-python -m haru_mlx.server                         # web demo on http://localhost:8998
 python -m haru_mlx.run_inference user.wav reply.wav --reference voice.wav --system-prompt "..."
 ```
 
-Haru ships without voice clips: `voice.wav` is a clip of the voice the model
-should speak with (one speaker, 3 seconds to 3 minutes), and the web demo asks
-you to upload or record one. Only use voices you have the right to use.
-
-Use headphones with `haru_mlx.local`, or the model hears itself. Every command
-takes `--model DIR` or `--hf-repo REPO` for the checkpoint, and `--quantize`:
+A recording in, the model's side of the conversation out. `--model DIR` or
+`--hf-repo REPO` selects the checkpoint, and `--quantize` its precision. The
+app starts in bfloat16 and can switch to 8-bit in its settings:
 
 | `--quantize` | Backbone weights |
 |---|---|
-| `8` (default of the live commands) | 8-bit: smaller, and a frame reads fewer bytes |
-| `none` (default of `run_inference`) | bfloat16, as published |
+| `none` (default) | bfloat16, as published |
+| `8` | 8-bit: smaller, and a frame reads fewer bytes |
 
 Quantization covers the language model's weight matrices and the embedding
 table; the audio codec, the audio head and all normalization gains keep the
 checkpoint's precision.
-
-A native macOS app is in [`swift/`](swift/README.md).
 
 ## Python API
 
@@ -52,7 +53,7 @@ import numpy as np
 from haru_mlx import DuplexConfig, DuplexSession, HaruModel
 from haru_mlx.audio import load_audio, prepare_reference
 
-model = HaruModel.from_pretrained("higurashi-ai/Haru-4B", quantize=8)
+model = HaruModel.from_pretrained("higurashi-ai/Haru-4B")       # quantize=8 for an 8-bit backbone
 voice = prepare_reference(load_audio("voice.wav"))          # mono float32, 24 kHz
 session = DuplexSession(model, system_prompt="...", reference=voice, config=DuplexConfig(seed=0))
 
@@ -73,8 +74,15 @@ if session.frames_ready:
 ```
 
 MLX keeps its GPU streams per thread: load the model and drive its sessions
-from one thread (`haru_mlx.worker.MLXWorker` is that thread for
-the server and the clients).
+from one thread (`haru_mlx.worker.MLXWorker` is that thread for the app's
+model server).
+
+## Metal kernels
+
+Two inner loops of a frame run as custom Metal kernels: the Gated DeltaNet
+recurrence of the language model and the depthwise convolution blocks of the
+audio codec. Both have plain MLX fallbacks with the same results, which are
+used on devices without Metal.
 
 ## Layout
 
@@ -84,10 +92,11 @@ the server and the clients).
 | `models/qwen3_5.py` | Qwen3.5 text backbone (Gated DeltaNet + attention), laid out for one position per frame |
 | `models/gated_delta.py` | the Gated DeltaNet recurrence (Metal kernel, with an array fallback) |
 | `models/meanflow_head.py` | one-step MeanFlow head: hidden state -> audio latent |
-| `models/vibevoice_codec.py` | VibeVoice acoustic codec, streaming |
+| `models/vibevoice_codec.py` | VibeVoice acoustic codec, streaming (Metal kernel for its depthwise convolutions, with an array fallback) |
 | `models/loaders.py`, `weights.py` | checkpoint loading; the tensor -> parameter mapping |
 | `session.py` | `DuplexSession`: one conversation |
-| `local.py`, `server.py`, `native.py`, `run_inference.py` | the commands |
+| `native.py` | the model server of the macOS app (a Unix socket) |
+| `run_inference.py` | offline inference |
 
 ## Tests
 

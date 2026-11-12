@@ -10,14 +10,14 @@ import { Masthead } from "../../components/Haru/Masthead";
 import { Stat, loadLastLatency } from "../Conversation/components/ServerAudio/ServerAudioStats";
 import { useModelParams } from "../Conversation/hooks/useModelParams";
 import { ReferenceAudio, ReferenceAudioValue } from "./ReferenceAudio";
-import { BACKCHANNEL_TEXT, CardTemplate, DialogueCard, parseCard, renderCard } from "./card";
+import { CardTemplate, DialogueCard, parseCard, renderCard } from "./card";
+import { errorMessage, isKey, setUiLanguage, storedLanguage, useT } from "../../i18n";
 
 // One edited card per language, kept in this browser.
 const cardKey = (lang: string) => lang === "ja" ? "dialogueCardV2" : `dialogueCardV2_${lang}`;
-const LANGUAGE_KEY = "cardLanguageV1";
 const REFERENCE_KEY = "referenceAudioV1";
-type CardPreset = { id: string; label: string; card: DialogueCard };
-type DefaultReference = ReferenceAudioValue & { preview_url: string };
+type CardPreset = { id: string; card: DialogueCard };
+type DefaultReference = Omit<ReferenceAudioValue, "name" | "previewUrl"> & { preview_url: string };
 
 type ServerConfig = {
   languages: { code: string; label: string }[];
@@ -39,10 +39,10 @@ const defaultReference = (config: ServerConfig, lang: string): ReferenceAudioVal
     return undefined;
   }
   const { preview_url, ...rest } = entry;
-  return { ...rest, previewUrl: preview_url };
+  return { ...rest, name: "", previewUrl: preview_url };
 };
 
-// A bundled voice ("default" = ja, "default_<lang>"), as opposed to an upload or recording.
+// A bundled voice ("default" for the server's default language, else "default_<lang>"), as opposed to an upload or recording.
 const isDefaultReferenceId = (id: string) => id === "default" || id.startsWith("default_");
 
 function getFloatFromStorage(val: string | null) {
@@ -85,6 +85,7 @@ function storeReference(value: ReferenceAudioValue | null) {
 }
 
 export const Queue: FC = () => {
+  const t = useT();
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState<boolean>(false);
   const [showMicrophoneAccessMessage, setShowMicrophoneAccessMessage] = useState<boolean>(false);
   const [, setShouldConnect] = useState<boolean>(false);
@@ -124,16 +125,10 @@ export const Queue: FC = () => {
         if (!cancelled) {
           setConfig(data);
           setPlayoutProfile(data.playout);
-          let lang = data.default_language;
-          try {
-            const stored = localStorage.getItem(LANGUAGE_KEY);
-            if (stored && data.card_presets[stored]) {
-              lang = stored;
-            }
-          } catch {
-            // ignore
-          }
+          const stored = storedLanguage();
+          const lang = stored && data.card_presets[stored] ? stored : data.default_language;
           setLanguageBase(lang);
+          setUiLanguage(lang);
           setCardBase(loadStoredCard(lang) ?? parseCard(data.card_presets[lang][0].card));
           // Preselect the bundled voice of the language unless the viewer chose another one.
           setReferenceBase(current => (current == null || isDefaultReferenceId(current.id))
@@ -207,6 +202,11 @@ export const Queue: FC = () => {
     }
   }, [language]);
   const presets = config && language ? config.card_presets[language] ?? [] : [];
+  const presetLabel = (id: string) => {
+    const key = `preset.${id}`;
+    return isKey(key) ? t(key) : id;
+  };
+  const example = (name?: string) => name ? t("field.example", { name }) : "";
   const sameCard = (a: DialogueCard | null, b: DialogueCard) => {
     const pb = parseCard(b);
     return !!a && !!pb && (Object.keys(pb) as (keyof DialogueCard)[]).every(k => (a[k] ?? "") === (pb[k] ?? ""));
@@ -217,18 +217,15 @@ export const Queue: FC = () => {
     storeReference(value);
   }, []);
 
-  // Switch the card (this language's own edits, else its first preset) and, unless the
-  // viewer uploaded or recorded a voice, the bundled voice.
+  // Switch the UI, the card (this language's own edits, else its first preset) and, unless
+  // the viewer uploaded or recorded a voice, the bundled voice.
   const setLanguage = useCallback((lang: string) => {
     if (!config || !config.card_presets[lang]) {
       return;
     }
     setLanguageBase(lang);
-    try {
-      localStorage.setItem(LANGUAGE_KEY, lang);
-    } catch {
-      // ignore
-    }
+    setUiLanguage(lang, true);
+    setStartError(null);
     setCardBase(loadStoredCard(lang) ?? parseCard(config.card_presets[lang][0].card));
     if (reference == null || isDefaultReferenceId(reference.id)) {
       setReference(defaultReference(config, lang) ?? null);
@@ -295,7 +292,7 @@ export const Queue: FC = () => {
         if (response.status === 404) {
           setReference(null);
         }
-        throw new Error(await response.text());
+        throw new Error(errorMessage(t, await response.text(), "error.start"));
       }
       const data = await response.json() as { id: string };
       modelParams.setChatSessionId(data.id);
@@ -306,12 +303,11 @@ export const Queue: FC = () => {
       }
     } catch (e) {
       console.error(e);
-      const message = e instanceof Error && e.message ? e.message : "";
-      setStartError(message || "会話を開始できませんでした。");
+      setStartError(e instanceof Error && e.message ? e.message : t("error.start"));
     } finally {
       setIsStarting(false);
     }
-  }, [canStart, reference, promptText, modelParams, startProcessor, getMicrophoneAccess, setReference]);
+  }, [canStart, reference, promptText, modelParams, startProcessor, getMicrophoneAccess, setReference, t]);
 
   if (hasMicrophoneAccess && audioContext.current && worklet.current && modelParams.chatSessionId) {
     return (
@@ -330,15 +326,15 @@ export const Queue: FC = () => {
   // Why the conversation cannot start yet, if anything.
   let blocker = "";
   if (!backendReady) {
-    blocker = "モデルを読み込み中です。";
+    blocker = t("state.modelLoading");
   } else if (missingPersona) {
-    blocker = "「モデルの人物設定」を入力してください。";
-  } else if (promptTooLong) {
-    blocker = `システムプロンプトは ${config?.system_prompt_max_chars} 文字以内にしてください。`;
+    blocker = t("state.personaMissing");
+  } else if (config && promptTooLong) {
+    blocker = t("error.prompt_too_long", { max_chars: config.system_prompt_max_chars });
   } else if (!reference) {
-    blocker = "参照音声をアップロードするか録音してください。";
+    blocker = t("state.voiceMissing");
   }
-  const problem = startError ?? (showMicrophoneAccessMessage ? "マイクの使用を許可してください。" : null);
+  const problem = startError ?? (showMicrophoneAccessMessage ? t("error.microphonePermission") : null);
 
   return (
     <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-4 py-7 sm:px-8">
@@ -350,7 +346,7 @@ export const Queue: FC = () => {
         <div className="flex items-center justify-end gap-3.5">
           {isStarting || !backendReady ?
             <span className="flex items-center gap-1.5 text-xs text-muted">
-              <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" />{isStarting ? "準備中…" : blocker}
+              <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" />{isStarting ? t("state.preparing") : blocker}
             </span>
             : blocker ?
               <span className="flex items-center gap-1.5 text-xs text-warning">
@@ -358,10 +354,10 @@ export const Queue: FC = () => {
               </span>
               :
               <span className="flex items-center gap-1.5 text-xs text-accent">
-                <CircleCheck className="h-3.5 w-3.5 shrink-0" />準備完了
+                <CircleCheck className="h-3.5 w-3.5 shrink-0" />{t("state.ready")}
               </span>}
           <Button accent large disabled={!canStart} onClick={async () => await onConnect()} className="shrink-0">
-            {isStarting ? "接続中…" : "会話を始める"}
+            {isStarting ? t("state.connecting") : t("action.start")}
           </Button>
         </div>
         {problem && <p className="flex items-start gap-1.5 whitespace-pre-wrap text-xs text-warning">
@@ -371,51 +367,51 @@ export const Queue: FC = () => {
 
       {lastLatency && <Card>
         <div className="flex items-end gap-7">
-          <Stat big label="前回の応答遅延" value={`${Math.round(lastLatency.p50 * 1000)} ms`} />
+          <Stat big label={t("stats.lastLatency")} value={`${Math.round(lastLatency.p50 * 1000)} ms`} />
           <Stat label="p95" value={`${Math.round(lastLatency.p95 * 1000)} ms`} />
         </div>
       </Card>}
 
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionTitle title="キャラクター" note="モデルの人物設定。空欄の項目は省略されます。" />
+          <SectionTitle title={t("character.title")} note={t("character.note")} />
           <div className="flex flex-wrap gap-1.5">
             {presets.map(p => (
               <Button key={p.id} selected={sameCard(card, p.card)} onClick={() => applyPreset(p.card)}>
-                {p.label}
+                {presetLabel(p.id)}
               </Button>
             ))}
           </div>
         </div>
         {card && config && language ? <>
-          <SelectField label="言語（モデルが話す言語。見出しと既定の声もこの言語になります。本文もこの言語で書いてください）"
+          <SelectField label={t("field.language")}
             value={language} disabled={isStarting} onChange={setLanguage}
             options={config.languages.map(l => [l.code, l.label] as [string, string])} />
           <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
-            <TextField label="モデルの名前" value={card.name} onChange={v => setCardField("name", v)} placeholder={presets[0] ? `例: ${presets[0].card.name}` : ""} />
-            <TextField label="あなたの名前" value={card.other_name} onChange={v => setCardField("other_name", v)} placeholder={presets[0] ? `例: ${presets[0].card.other_name}` : ""} />
-            <SelectField label="モデルの性別" value={card.gender} onChange={v => setCardField("gender", v)}
-              options={[["", "指定しない"], ["female", "女性"], ["male", "男性"]]} />
-            <SelectField label="モデルの相づち" value={card.backchannel} onChange={v => setCardField("backchannel", v)}
-              options={[["", "指定しない"], ...Object.entries(BACKCHANNEL_TEXT)] as [string, string][]} />
+            <TextField label={t("field.modelName")} value={card.name} onChange={v => setCardField("name", v)} placeholder={example(presets[0]?.card.name)} />
+            <TextField label={t("field.yourName")} value={card.other_name} onChange={v => setCardField("other_name", v)} placeholder={example(presets[0]?.card.other_name)} />
+            <SelectField label={t("field.gender")} value={card.gender} onChange={v => setCardField("gender", v)}
+              options={[["", t("option.unspecified")], ["female", t("option.female")], ["male", t("option.male")]]} />
+            <SelectField label={t("field.backchannel")} value={card.backchannel} onChange={v => setCardField("backchannel", v)}
+              options={[["", t("option.unspecified")], ["low", t("backchannel.low")], ["mid", t("backchannel.mid")], ["high", t("backchannel.high")]]} />
           </div>
-          <AreaField label="モデルの人物設定（必須）" rows={5} value={card.persona} onChange={v => setCardField("persona", v)} />
-          <AreaField label="モデルとあなたの関係性" rows={3} value={card.relationship} onChange={v => setCardField("relationship", v)} />
-          <AreaField label="状況" rows={3} value={card.situation} onChange={v => setCardField("situation", v)} />
-          <p className="text-xs text-muted">本文はモデル・あなたを名前で書くと学習時と同じ形式になります。</p>
+          <AreaField label={t("field.persona")} rows={5} value={card.persona} onChange={v => setCardField("persona", v)} />
+          <AreaField label={t("field.relationship")} rows={3} value={card.relationship} onChange={v => setCardField("relationship", v)} />
+          <AreaField label={t("field.situation")} rows={3} value={card.situation} onChange={v => setCardField("situation", v)} />
+          <p className="text-xs text-muted">{t("character.hint")}</p>
           <details className="text-[13px]">
-            <summary className="cursor-pointer text-accent">モデルに渡すシステムプロンプトを確認</summary>
+            <summary className="cursor-pointer text-accent">{t("prompt.show")}</summary>
             <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-paper p-3.5 font-[inherit] text-xs leading-relaxed">{promptText}</pre>
             <p className={`mt-1 text-right text-xs tabular-nums ${promptTooLong ? "text-warning" : "text-muted"}`}>
-              {promptText.length}{config ? ` / ${config.system_prompt_max_chars}` : ""} 文字
+              {t("prompt.length", { count: promptText.length, max: config.system_prompt_max_chars })}
             </p>
           </details>
-        </> : <p className="text-[13px] text-muted">読み込み中…</p>}
+        </> : <p className="text-[13px] text-muted">{t("loading")}</p>}
       </Card>
 
       <Card>
-        <SectionTitle title="声"
-          note={`モデルの声の参照音声。1 人の話者で ${config?.reference_min_seconds ?? 3} 秒〜${Math.round((config?.reference_max_seconds ?? 180) / 60)} 分。`} />
+        <SectionTitle title={t("voice.title")}
+          note={t("voice.note", { min: config?.reference_min_seconds ?? 3, max: Math.round((config?.reference_max_seconds ?? 180) / 60) })} />
         <ReferenceAudio
           value={reference}
           onChange={setReference}
@@ -427,13 +423,15 @@ export const Queue: FC = () => {
       </Card>
 
       <Card>
-        <SectionTitle title="設定" note="" />
+        <SectionTitle title={t("settings.title")} note="" />
         {/* Each control sits between what its two ends do. */}
-        <SettingRow label="CFG scale" help="既定 1.5、1〜2 で指定。大きい方がはっきり話す。">
-          <Hint>自然</Hint>
-          <input type="range" className="w-[200px] max-w-full" step="0.05" min="1" max="2" disabled={isStarting}
-            value={modelParams.cfgScale} onChange={e => modelParams.setCfgScale(parseFloat(e.target.value))} />
-          <Hint>はっきり</Hint>
+        <SettingRow label="CFG scale" help={t("settings.cfgHelp")}>
+          <div className="flex min-w-0 max-w-full items-center gap-2.5">
+            <Hint>{t("settings.cfgLow")}</Hint>
+            <input type="range" className="w-[200px] min-w-0" step="0.05" min="1" max="2" disabled={isStarting}
+              value={modelParams.cfgScale} onChange={e => modelParams.setCfgScale(parseFloat(e.target.value))} />
+            <Hint>{t("settings.cfgHigh")}</Hint>
+          </div>
           <input type="number" className={`${fieldClass} !w-20 !py-1 tabular-nums`} step="0.05" min="1" max="2"
             value={cfgInput} disabled={isStarting}
             onChange={e => {
@@ -443,15 +441,15 @@ export const Queue: FC = () => {
             }}
             onBlur={() => setCfgInput(modelParams.cfgScale.toString())} />
         </SettingRow>
-        <SwitchButton className="self-start" disabled={isStarting} onClick={modelParams.resetParams}>CFG scale を既定に戻す</SwitchButton>
+        <SwitchButton className="self-start" disabled={isStarting} onClick={modelParams.resetParams}>{t("settings.cfgReset")}</SwitchButton>
 
         <div className="flex flex-col gap-2.5 rounded-xl bg-paper p-3.5">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[13px] font-semibold">WebRTC（任意）</p>
-            {hasTurnKey && <Button onClick={() => setTurnKey({ keyId: "", token: "" })}>消去</Button>}
+            <p className="text-[13px] font-semibold">{t("webrtc.title")}</p>
+            {hasTurnKey && <Button onClick={() => setTurnKey({ keyId: "", token: "" })}>{t("webrtc.clear")}</Button>}
           </div>
           <p className="text-xs text-muted">
-            Cloudflare の TURN キーを入れると音声が途切れにくい WebRTC で接続します。空欄ならサーバーの設定に従います。
+            {t("webrtc.help")}
           </p>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <input type="text" className={fieldClass} value={turnKey.keyId} placeholder="TURN Key ID"
@@ -462,13 +460,13 @@ export const Queue: FC = () => {
               onChange={e => setTurnKey({ ...turnKey, token: e.target.value })} />
           </div>
           <p className="text-xs text-muted">
-            このブラウザにだけ保存し、ブラウザから Cloudflare に一時的な接続情報を取りに行くのに使います（サーバーには送りません）。
+            {t("webrtc.privacy")}
           </p>
         </div>
       </Card>
 
       <p className="pb-2 text-center text-xs text-muted">
-        会話は 1 回 {Math.round((config?.time_limit_seconds ?? 300) / 60)} 分までです。<a
+        {t("footer.limit", { minutes: Math.round((config?.time_limit_seconds ?? 300) / 60) })} <a
           href="https://huggingface.co/higurashi-ai" className="text-accent hover:underline">@higurashi</a>
       </p>
     </div>

@@ -52,11 +52,14 @@ or record a clip of the voice the model should speak with: one speaker, 3
 seconds to 3 minutes, clean speech. In Python, pass it as `reference`. Only
 use voices you have the right to use.
 
-On a Mac with Apple silicon:
+On a Mac with Apple silicon, build the native app (see
+[`haru_mlx/swift`](haru_mlx/swift/README.md)):
 
 ```bash
-pip install -e haru_mlx
-python -m haru_mlx.server
+cd haru_mlx
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+cd swift && ./build_app.sh        # then open build/Haru.app
 ```
 
 ## Python
@@ -79,8 +82,7 @@ The model is one frame ahead of the user: `start()` returns frame 0, and each
 
 ### The system prompt
 
-Haru was trained with character cards in a fixed layout, and follows them much
-better than free-form instructions. Build one with `render_card`:
+Haru was trained with character cards in a fixed layout. Build one with `render_card`:
 
 ```python
 from haru.prompt import card_templates, render_card
@@ -113,17 +115,22 @@ For many concurrent conversations and the lowest latency on a GPU server, see
 python -m haru.server --backend vllm --vllm-url http://localhost:8000
 ```
 
+## Custom kernels
+
+The hot paths of a frame have hand-written kernels, alongside plain
+implementations that give the same results:
+
+| Where | Kernel | What it speeds up |
+| --- | --- | --- |
+| `haru` (NVIDIA GPUs) | [Triton](https://github.com/triton-lang/triton) kernels replayed from CUDA graphs ([`haru/haru/codec_triton`](haru/haru/codec_triton)) | The audio codec: about 0.7 ms instead of 6 ms to encode or decode a frame. Opt-in with `DuplexConfig(codec_backend="triton")` |
+| `haru_vllm` | The same Triton codec, used automatically | Audio encode and decode inside the engine step |
+| `haru_mlx` (Apple silicon) | Metal kernels ([`gated_delta.py`](haru_mlx/haru_mlx/models/gated_delta.py), [`vibevoice_codec.py`](haru_mlx/haru_mlx/models/vibevoice_codec.py)) | The Gated DeltaNet recurrence of the language model and the depthwise convolutions of the codec |
+
 ## How it works
 
-```
-position t:   text[t] + model_audio[t] + user_audio[t]      (summed embeddings)
-                  │
-            language model  (Qwen3.5-4B backbone)
-                  │ hidden[t]
-        ┌─────────┴──────────┐
-   text[t+1]           audio latent[t+1]  ──► codec decoder ──► 3200 samples
- (output embedding)     (MeanFlow head)
-```
+<p align="center">
+  <img src="assets/architecture.svg" width="720" alt="Haru-4B architecture: in every 133 ms frame, the user's speech latent, the model's previous text token and its previous speech latent are summed into one position of the language model, whose output predicts the next text token and the next speech latent.">
+</p>
 
 - The **text stream** carries the model's words in chunks. Frames without text
   hold a padding token, and an end-of-padding token on the frame before the

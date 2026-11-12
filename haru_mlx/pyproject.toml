@@ -16,18 +16,12 @@ dependencies = [
     "numpy>=1.26",
     "scipy>=1.13",
     "soundfile>=0.13",
-    "aiohttp>=3.10,<4",
-    "sphn>=0.2,<0.3",
 ]
 
 [project.optional-dependencies]
-webrtc = ["aiortc==1.15.0", "av>=14"]
-local = ["sounddevice>=0.5"]
 dev = ["pytest>=8"]
 
 [project.scripts]
-haru-mlx-local = "haru_mlx.local:main"
-haru-mlx-server = "haru_mlx.server:main"
 haru-mlx-inference = "haru_mlx.run_inference:main"
 haru-mlx-native = "haru_mlx.native:main"
 
@@ -38,7 +32,7 @@ version = { attr = "haru_mlx.__version__" }
 include = ["haru_mlx*"]
 
 [tool.setuptools.package-data]
-haru_mlx = ["assets/**/*", "static/**/*"]
+haru_mlx = ["assets/**/*"]
 
 [tool.setuptools.exclude-package-data]
 haru_mlx = ["assets/voices/*"]

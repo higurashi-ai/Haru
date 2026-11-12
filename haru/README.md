@@ -19,6 +19,18 @@ Requirements: Python 3.10 or later and a CUDA GPU with about 12 GB of memory.
 `ffmpeg` on the `PATH` is needed to use voice clips recorded in the browser
 (WebM / MP4); WAV, FLAC and Ogg files work without it.
 
+## Faster audio codec
+
+With the `triton` extra, the codec can run as Triton kernels replayed from
+CUDA graphs: about 0.7 ms instead of 6 ms per encoded or decoded frame on a
+recent GPU, with the same output up to bfloat16 rounding. It is opt-in:
+
+```python
+session = DuplexSession(model, system_prompt=card, reference=voice, config=DuplexConfig(codec_backend="triton"))
+```
+
+The first use in a new environment compiles the kernels (about 15 seconds).
+
 ## Layout
 
 | Module | Contents |

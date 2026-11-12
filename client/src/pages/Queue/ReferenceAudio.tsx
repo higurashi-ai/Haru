@@ -2,6 +2,7 @@ import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, LoaderCircle, Play, Square, TriangleAlert } from "lucide-react";
 import { Button, SwitchButton } from "../../components/Button/Button";
 import { getMimeType } from "../Conversation/getMimeType";
+import { errorMessage, useT } from "../../i18n";
 
 export type ReferenceAudioValue = {
   id: string;
@@ -23,8 +24,8 @@ type ReferenceAudioProps = {
 };
 
 type Source = "preset" | "file" | "recording";
-// Name given to a microphone recording.
-const RECORDING_NAME = "録音";
+// Name given to a microphone recording (shown translated).
+const RECORDING_NAME = "recording";
 
 const formatSeconds = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -36,6 +37,7 @@ const formatSeconds = (seconds: number) => {
 // recording, sent to /api/reference_audio (decoded, silence-trimmed and
 // capped to the last `maxSeconds` on the server).
 export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSeconds, disabled, defaultValue, defaultLabel }) => {
+  const t = useT();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -55,7 +57,7 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
         body: blob,
       });
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(errorMessage(t, await response.text(), "error.upload"));
       }
       const data = await response.json() as { id: string, seconds: number, trimmed: boolean };
       if (value?.previewUrl?.startsWith("blob:")) {
@@ -70,12 +72,11 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
       });
     } catch (e) {
       console.error(e);
-      const message = e instanceof Error && e.message ? e.message : "";
-      setError(message || "アップロードに失敗しました。別の音声ファイルで試してください。");
+      setError(e instanceof Error && e.message ? e.message : t("error.upload"));
     } finally {
       setIsUploading(false);
     }
-  }, [onChange, value]);
+  }, [onChange, value, t]);
 
   const stopTimer = () => {
     if (timer.current != null) {
@@ -91,7 +92,7 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
       console.error(e);
-      setError("マイクを使用できません。ブラウザのマイク許可を確認してください。");
+      setError(t("error.microphone"));
       return;
     }
     const mimeType = getMimeType("audio");
@@ -114,7 +115,7 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
     setElapsed(0);
     const startedAt = Date.now();
     timer.current = window.setInterval(() => setElapsed((Date.now() - startedAt) / 1000), 200);
-  }, [upload]);
+  }, [upload, t]);
 
   const stopRecording = useCallback(() => {
     stopTimer();
@@ -171,7 +172,7 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
 
   const busy = disabled || isUploading;
   const ownName = value && !isDefault ? value.name : null;
-  const sources: [Source, string][] = [["preset", "既定の声"], ["file", "ファイル"], ["recording", "録音"]];
+  const sources: [Source, string][] = [["preset", t("voice.default")], ["file", t("voice.file")], ["recording", t("voice.recording")]];
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -188,7 +189,7 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
         ))}
         <Button className="ml-auto" disabled={!value?.previewUrl} onClick={togglePreview}>
           {isPlaying ? <Square className="h-3 w-3 fill-current" /> : <Play className="h-3 w-3 fill-current" />}
-          {isPlaying ? "停止" : "試聴"}
+          {isPlaying ? t("voice.stop") : t("voice.preview")}
         </Button>
       </div>
       <input
@@ -206,24 +207,24 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
       />
       <div className="flex min-h-7 flex-wrap items-center gap-2.5 text-[13px] text-muted">
         {source === "preset" &&
-          <span>{defaultValue ? `既定の声${defaultLabel ? `（${defaultLabel}）` : ""}` : "この言語には既定の声がありません"}</span>}
+          <span>{!defaultValue ? t("voice.noDefault") : defaultLabel ? t("voice.defaultOf", { language: defaultLabel }) : t("voice.default")}</span>}
         {source === "file" && <>
-          <span className="min-w-0 truncate">{ownName && ownName !== RECORDING_NAME ? ownName : "ファイルが選ばれていません"}</span>
-          <Button className="ml-auto" disabled={busy} onClick={() => fileInputRef.current?.click()}>ファイルを選択…</Button>
+          <span className="min-w-0 truncate">{ownName && ownName !== RECORDING_NAME ? ownName : t("voice.noFile")}</span>
+          <Button className="ml-auto" disabled={busy} onClick={() => fileInputRef.current?.click()}>{t("voice.chooseFile")}</Button>
         </>}
         {source === "recording" && <>
           {isRecording && <span className="h-[9px] w-[9px] rounded-full bg-[#ff3b30]" />}
           <span className="tabular-nums">
-            {isRecording ? formatSeconds(elapsed) : ownName === RECORDING_NAME && value ? `${value.seconds.toFixed(1)} 秒` : "まだ録音していません"}
+            {isRecording ? formatSeconds(elapsed) : ownName === RECORDING_NAME && value ? t("voice.seconds", { seconds: value.seconds.toFixed(1) }) : t("voice.notRecorded")}
           </span>
           <Button className="ml-auto" selected={isRecording} disabled={busy && !isRecording}
             onClick={isRecording ? stopRecording : startRecording}>
-            {isRecording ? "録音を停止" : "録音を開始"}
+            {isRecording ? t("voice.stopRecording") : t("voice.startRecording")}
           </Button>
         </>}
       </div>
       {isUploading && <p className="flex items-center gap-1.5 text-xs text-muted">
-        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />参照音声を処理しています…
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />{t("voice.processing")}
       </p>}
       {error && <p className="flex items-start gap-1.5 text-xs text-warning">
         <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />{error}
@@ -231,11 +232,15 @@ export const ReferenceAudio: FC<ReferenceAudioProps> = ({ value, onChange, maxSe
       <div className="flex flex-wrap items-center gap-2.5 rounded-xl bg-paper px-3.5 py-2.5 text-[13px]">
         {value ? <>
           <CircleCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
-          <span className="min-w-0 truncate">
-            使用する声: {isDefault ? "既定の声" : value.name}（{value.seconds.toFixed(1)} 秒{value.trimmed ? `・末尾 ${maxSeconds} 秒を使用` : ""}）
+          <span className="min-w-0 flex-1 break-words">
+            {t(value.trimmed ? "voice.inUseTrimmed" : "voice.inUse", {
+              name: isDefault ? t("voice.default") : value.name === RECORDING_NAME ? t("voice.recording") : value.name,
+              seconds: value.seconds.toFixed(1),
+              max: maxSeconds,
+            })}
           </span>
-          {!disabled && !isDefault && <SwitchButton className="ml-auto" onClick={clear}>削除</SwitchButton>}
-        </> : <span className="text-muted">声がまだ選ばれていません</span>}
+          {!disabled && !isDefault && <SwitchButton className="ml-auto" onClick={clear}>{t("voice.remove")}</SwitchButton>}
+        </> : <span className="text-muted">{t("voice.none")}</span>}
       </div>
     </div>
   );

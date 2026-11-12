@@ -431,12 +431,12 @@ struct SetupView: View {
             }
             HStack(spacing: 10) {
                 settingLabel("精度")
-                hint("高速")
-                ForEach([("int8", "int8"), ("bf16", "BF16")], id: \.0) { value, label in
-                    Button(label) { model.setPrecision(value) }
-                        .buttonStyle(HaruButtonStyle(selected: (model.precision.isEmpty ? "int8" : model.precision) == value))
-                }
                 hint("高精度")
+                ForEach([("bf16", "BF16"), ("int8", "int8")], id: \.0) { value, label in
+                    Button(label) { model.setPrecision(value) }
+                        .buttonStyle(HaruButtonStyle(selected: (model.precision.isEmpty ? "bf16" : model.precision) == value))
+                }
+                hint("高速")
             }
             .disabled(model.isRecording || model.exportProgress != nil)
         }

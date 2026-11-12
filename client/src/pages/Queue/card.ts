@@ -32,9 +32,6 @@ export const EMPTY_CARD: DialogueCard = {
   situation: "",
 };
 
-// UI labels of the backchannel levels (the UI is Japanese whatever the card language).
-export const BACKCHANNEL_TEXT: Record<string, string> = { low: "少なめ", mid: "普通", high: "多め" };
-
 // Field order of the rendered card.
 const CARD_FIELDS: (keyof DialogueCard)[] = ["persona", "name", "gender", "backchannel", "other_name", "relationship", "situation"];
 

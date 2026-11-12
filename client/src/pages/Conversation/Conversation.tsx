@@ -16,6 +16,7 @@ import fixWebmDuration from "webm-duration-fix";
 import { getMimeType, getExtension } from "./getMimeType";
 import { RtcSocket } from "./rtcSocket";
 import { VIDEO_PIXELS } from "../../haru/painters";
+import { useT } from "../../i18n";
 
 const MIC_CONSTRAINTS: MediaStreamConstraints = {
   audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
@@ -52,6 +53,7 @@ export const Conversation: FC<ConversationProps> = ({
   modelName,
   ...params
 }) => {
+  const t = useT();
   const getAudioStats = useRef<() => AudioStats>(() => ({
     playedAudioDuration: 0,
     missedAudioDuration: 0,
@@ -190,7 +192,7 @@ export const Conversation: FC<ConversationProps> = ({
   };
   // Which transport the conversation ended up on (WebRTC falls back to WebSocket).
   const transport = (socket as unknown as { transport?: string } | null)?.transport === "webrtc" ? "WebRTC" : "WebSocket";
-  const statusText = isConnected ? `接続中（${transport}）` : isWaitingForHandshake ? "接続待ち…（ほかの会話が終わるのを待っています）" : isOver ? "会話は終了しました" : "切断";
+  const statusText = isConnected ? t("status.connected", { transport }) : t(isWaitingForHandshake ? "status.waiting" : isOver ? "status.ended" : "status.disconnected");
 
   return (
     <SocketContext.Provider
@@ -216,7 +218,7 @@ export const Conversation: FC<ConversationProps> = ({
         <div className="flex h-screen flex-col gap-5 p-4 sm:p-6" style={{ height: "100dvh" }}>
           <div className="flex items-center gap-3">
             {isOver && (
-              <Button accent onClick={restart}>設定に戻る</Button>
+              <Button accent onClick={restart}>{t("action.backToSetup")}</Button>
             )}
             {!isOver && !isWaitingForHandshake && (
               <Button
@@ -225,11 +227,11 @@ export const Conversation: FC<ConversationProps> = ({
                   isConnected ? stop() : start();
                 }}
               >
-                {isConnected ? "会話を終える" : "接続する"}
+                {isConnected ? t("action.end") : t("action.connect")}
               </Button>
             )}
             <span className={`h-2 w-2 shrink-0 rounded-full ${isConnected ? "bg-accent" : "bg-line"}`} />
-            <span className="min-w-0 truncate text-[13px] text-muted">{statusText}</span>
+            <span className="min-w-0 flex-1 text-[13px] leading-tight text-muted">{statusText}</span>
             <div className="ml-auto shrink-0">
               <Masthead compact />
             </div>
@@ -237,16 +239,16 @@ export const Conversation: FC<ConversationProps> = ({
 
           {(audioURL || videoURL) && (
             <div className="flex flex-wrap items-center gap-2.5 rounded-[18px] bg-card p-[18px]">
-              <span className="text-[13px] font-medium">この会話を保存</span>
+              <span className="text-[13px] font-medium">{t("save.title")}</span>
               {audioURL && <a href={audioURL} download={`haru audio.${getExtension("audio")}`} className={capsuleClass({ accent: true })}>
-                <AudioLines className="h-3.5 w-3.5" />音声
+                <AudioLines className="h-3.5 w-3.5" />{t("save.audio")}
               </a>}
               {videoURL && <a href={videoURL} download={`haru video.${getExtension("video")}`} className={capsuleClass({ accent: true })}>
-                <Film className="h-3.5 w-3.5" />動画
+                <Film className="h-3.5 w-3.5" />{t("save.video")}
               </a>}
               {videoURL && getExtension("video") === "webm" &&
                 <a href="https://restream.io/tools/webm-to-mp4-converter" target="_blank" rel="noreferrer"
-                  className="text-[13px] text-accent hover:underline">mp4 に変換するには</a>}
+                  className="text-[13px] text-accent hover:underline">{t("save.toMp4")}</a>}
             </div>
           )}
 
@@ -262,8 +264,8 @@ export const Conversation: FC<ConversationProps> = ({
           <WaveLanes
             userAnalyser={userAnalyser}
             modelAnalyser={modelAnalyser}
-            userName={userName?.trim() || "あなた"}
-            modelName={modelName?.trim() || "モデル"}
+            userName={userName?.trim() || t("speaker.you")}
+            modelName={modelName?.trim() || t("speaker.model")}
             copyCanvasRef={canvasRef}
           />
 

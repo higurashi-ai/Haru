@@ -123,8 +123,9 @@ def test_config_and_ready():
         assert (await (await client.get("/api/ready")).json()) == {"ready": True}
         config = await (await client.get("/api/config")).json()
         codes = [entry["code"] for entry in config["languages"]]
-        assert config["default_language"] == "ja" and "en" in codes
+        assert config["default_language"] == "en" and "ja" in codes
         assert set(config["card_presets"]) == set(codes) == set(config["card_templates"])
+        assert all(set(preset) == {"id", "card"} for presets in config["card_presets"].values() for preset in presets)
         assert config["default_references"] == {}  # no voice ships with the package
         assert config["time_limit_seconds"] == 60 and config["webrtc"] is False
         assert config["playout"]["mic_frames_per_page"] == 1
@@ -145,9 +146,16 @@ def test_reference_upload_trims_and_validates():
         info = await response.json()
         assert response.status == 200 and 4.0 <= info["seconds"] <= 4.5 and info["trimmed"] is False
         assert len(server.references[info["id"]]) == round(info["seconds"] * SAMPLE_RATE)
-        assert (await client.post("/api/reference_audio", data=wav(tone(48_000)))).status == 400  # too short
-        assert (await client.post("/api/reference_audio", data=b"")).status == 400
-        assert (await client.post("/api/reference_audio", data=b"not audio")).status == 400
+        short = await client.post("/api/reference_audio", data=wav(tone(48_000)))
+        assert short.status == 400
+        assert await short.json() == {
+            "code": "audio_too_short", "error": "The audio has only 1.0 s of speech; at least 3 s is needed.",
+            "seconds": 1.0, "min_seconds": 3.0,
+        }
+        empty = await client.post("/api/reference_audio", data=b"")
+        assert empty.status == 400 and (await empty.json())["code"] == "empty_upload"
+        unreadable = await client.post("/api/reference_audio", data=b"not audio")
+        assert unreadable.status == 400 and (await unreadable.json())["code"] == "unreadable_audio"
         session_id = await create_session(client, reference_audio_id=info["id"])
         assert server.sessions[session_id].reference is server.references[info["id"]]
 
@@ -156,10 +164,18 @@ def test_reference_upload_trims_and_validates():
 
 def test_session_validation_and_guidance_clamp():
     async def scenario(client, server, backend):
-        assert (await client.post("/api/session", data=b"{")).status == 400
-        assert (await client.post("/api/session", json={"system_prompt": " ", "reference_audio_id": "voice"})).status == 400
-        assert (await client.post("/api/session", json={"system_prompt": "x" * 4001, "reference_audio_id": "voice"})).status == 400
-        assert (await client.post("/api/session", json={"system_prompt": "x", "reference_audio_id": "nope"})).status == 404
+        async def rejected(status, code, **request):
+            response = await client.post("/api/session", **request)
+            assert response.status == status
+            body = await response.json()
+            assert body["code"] == code and body["error"].isascii()
+            return body
+
+        await rejected(400, "invalid_json", data=b"{")
+        await rejected(400, "prompt_empty", json={"system_prompt": " ", "reference_audio_id": "voice"})
+        too_long = await rejected(400, "prompt_too_long", json={"system_prompt": "x" * 4001, "reference_audio_id": "voice"})
+        assert too_long["max_chars"] == 4000
+        await rejected(404, "reference_not_found", json={"system_prompt": "x", "reference_audio_id": "nope"})
         assert server.sessions[await create_session(client)].guidance_scale == 1.5
         assert server.sessions[await create_session(client, guidance_scale=9)].guidance_scale == 2.0
         assert server.sessions[await create_session(client, guidance_scale="x")].guidance_scale == 1.5

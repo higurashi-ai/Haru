@@ -15,8 +15,8 @@ weights include its parameters.
 
 ## Moshi web client
 
-The web client (`client/`, and its built bundle in `haru/haru/static/` and
-`haru_mlx/haru_mlx/static/`) is derived from the Moshi web client.
+The web client (`client/`, and its built bundle in `haru/haru/static/`) is
+derived from the Moshi web client.
 
 - Copyright (c) Kyutai
 - License: MIT (see `client/LICENSE`)

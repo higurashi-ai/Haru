@@ -5,7 +5,6 @@ PyTorch). Skipped when ``haru`` is not installed next to ``haru_mlx``.
 """
 
 import ast
-import re
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -45,15 +44,9 @@ def methods(path: Path, cls: str) -> dict[str, str]:
     raise KeyError(cls)
 
 
-@pytest.mark.parametrize("name", ["audio.py", "config.py", "playout.py"])
+@pytest.mark.parametrize("name", ["audio.py", "config.py"])
 def test_identical_files(torch_package, name):
     assert (MLX / name).read_bytes() == (torch_package / name).read_bytes()
-
-
-def test_webrtc_differs_only_in_the_package_name(torch_package):
-    ours = (MLX / "webrtc.py").read_text(encoding="utf-8")
-    ours = ours.replace("haru_mlx", "haru").replace("from .frames import Frame", "from .session import Frame")
-    assert ours == (torch_package / "webrtc.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -67,11 +60,6 @@ def test_webrtc_differs_only_in_the_package_name(torch_package):
         ("frames.py", "session.py", ["Frame"]),
         ("backends.py", "backends.py", ["SessionSettings", "Conversation", "Backend"]),
         ("hub.py", "models/loaders.py", ["DEFAULT_REPO", "_FILES", "resolve_checkpoint"]),
-        (
-            "server.py", "server.py",
-            ["KIND_HANDSHAKE", "PING_SECONDS", "NETWORK_PROFILES", "encode_message", "decode_message", "FrameBuffer",
-             "ServerOptions", "DemoServer"],
-        ),
     ],
 )
 def test_shared_definitions(torch_package, ours, theirs, names):
@@ -101,9 +89,3 @@ def test_duplex_config_has_the_same_fields_and_defaults(torch_package):
 def test_dry_state_bookkeeping_is_shared(torch_package):
     mine, reference = methods(MLX / "sampling.py", "DryState"), methods(torch_package / "sampling.py", "DryState")
     assert mine["__init__"] == reference["__init__"] and mine["update"] == reference["update"]
-
-
-def test_server_routes_match(torch_package):
-    route = re.compile(r'app\.router\.add_(get|post)\("([^"]+)"')
-    ours = route.findall((MLX / "server.py").read_text(encoding="utf-8"))
-    assert ours and ours == route.findall((torch_package / "server.py").read_text(encoding="utf-8"))

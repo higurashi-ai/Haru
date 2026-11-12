@@ -10,13 +10,10 @@ import pytest
 PACKAGE = Path(__file__).parent.parent / "haru_mlx"
 FORBIDDEN = {"torch", "transformers", "mlx_lm", "haru"}
 ALLOWED = {
-    "mlx", "numpy", "tokenizers", "huggingface_hub", "scipy", "soundfile",  # core
-    "aiohttp", "sphn",  # server
-    "aiortc", "av",  # extra: webrtc
-    "sounddevice",  # extra: local
+    "mlx", "numpy", "tokenizers", "huggingface_hub", "scipy", "soundfile",
 }
 # Modules that must import without MLX (they are what the MLX-free tests use).
-PURE = ["", "audio", "backends", "config", "frames", "hub", "lm_config", "playout", "prompt", "sampling", "weights", "worker"]
+PURE = ["", "audio", "backends", "config", "frames", "hub", "lm_config", "prompt", "sampling", "weights", "worker"]
 
 
 def module_names(path: Path) -> set[str]:
@@ -47,9 +44,7 @@ def test_pure_modules_import_without_mlx(module):
     assert result.returncode == 0, result.stderr
 
 
-def test_server_modules_import_without_mlx():
-    pytest.importorskip("aiohttp")
-    pytest.importorskip("sphn")
-    code = "import sys; sys.modules['mlx'] = None; import haru_mlx.server, haru_mlx.native, haru_mlx.run_inference"
+def test_commands_import_without_mlx():
+    code = "import sys; sys.modules['mlx'] = None; import haru_mlx.native, haru_mlx.run_inference"
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=PACKAGE.parent)
     assert result.returncode == 0, result.stderr

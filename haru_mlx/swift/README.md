@@ -62,8 +62,9 @@ so a copy moved to another Mac cannot start the server.
 2. **Voice** (声): an audio file or a recording of 3 seconds to 3 minutes of
    one speaker. Haru ships without voice clips; bring your own.
 3. **Settings** (設定): the microphone and the output, the guidance scale, the
-   margin (playback slack for a late model step) and the precision (int8, or
-   BF16: the server reloads the model).
+   margin (playback slack for a late model step) and the precision: BF16
+   (the default, as published) or int8 (smaller and faster; switching reloads
+   the model).
 4. Click **会話を始める** and talk. A few seconds after your last edit of the
    card or the voice, the server reads them into the model in the background,
    and **準備完了** appears next to the button; the conversation then starts as

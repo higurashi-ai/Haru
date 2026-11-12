@@ -49,7 +49,7 @@ All three read the same checkpoint,
 With an NVIDIA GPU (about 12 GB of memory):
 
 ```bash
-pip install -e haru
+pip install -e ./haru
 python -m haru.server --hf-repo higurashi-ai/Haru-4B
 ```
 
@@ -57,7 +57,7 @@ Open <http://localhost:8998>, pick a character, give the model a voice, and
 talk. Use headphones, otherwise the model hears itself. A browser only gives a
 page microphone access on `localhost` or over HTTPS.
 
-To let someone else try it, add `--share` (`pip install -e "haru[share]"`): the
+To let someone else try it, add `--share` (`pip install -e "./haru[share]"`): the
 server prints a public HTTPS link that tunnels to it. Anyone with the link can
 use the demo, and the traffic passes through Gradio's share servers.
 

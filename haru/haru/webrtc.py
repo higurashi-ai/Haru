@@ -1,4 +1,4 @@
-"""WebRTC transport of the web demo (optional: ``pip install "haru[webrtc]"``).
+"""WebRTC transport of the web demo (optional: the ``webrtc`` extra, ``pip install -e "./haru[webrtc]"``).
 
 The browser sends its microphone as an Opus track and plays the model's track;
 text and session events travel on the "events" DataChannel. Over a lossy or

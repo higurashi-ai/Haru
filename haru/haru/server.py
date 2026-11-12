@@ -626,7 +626,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         backend = LocalBackend(args.model or args.hf_repo or DEFAULT_REPO, args.device, args.warmup_frames)
     if args.webrtc == "on" and webrtc is None:
-        parser.error('--webrtc on needs the optional dependencies: pip install "haru[webrtc]"')
+        parser.error('--webrtc on needs the optional dependencies: pip install -e "./haru[webrtc]" from the repository')
     options = ServerOptions(
         static_dir=args.static,
         max_sessions=args.max_sessions,
@@ -646,7 +646,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             from gradio import networking
         except ImportError:
-            parser.error('--share needs gradio: pip install "haru[share]"')
+            parser.error('--share needs gradio: pip install -e "./haru[share]" from the repository')
 
         async def share(_app: web.Application) -> None:
             host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host

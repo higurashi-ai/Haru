@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+node_modules/
+dist/
+build/
+.pytest_cache/
+.DS_Store
+
+# Voice clips are not distributed: users bring their own (see README).
+haru/haru/assets/voices/
+haru_mlx/haru_mlx/assets/voices/

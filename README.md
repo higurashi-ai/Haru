@@ -1,0 +1,170 @@
+# Haru
+
+Haru is a full-duplex speech language model: it listens and speaks at the same
+time, the way people do on a phone call. This repository contains the inference
+code for **Haru-4B**, a pretrained base model, with three implementations and a
+web demo.
+
+- **Native full-duplex at 7.5 Hz.** Every 133 ms the model takes one frame of
+  the user's audio and produces one frame of its own audio and text. User
+  audio, model audio and model text are summed into a single position of the
+  language model, so listening and speaking never wait for each other.
+- **Continuous audio, one sampling step.** Audio is a 64-dimensional latent
+  per frame. A small MLP head with MeanFlow sampling produces it in one step
+  from the language model's hidden state; there is no separate audio
+  transformer and there are no discrete audio tokens.
+- **Character and voice control.** A text card sets the character, a short
+  reference clip sets the voice.
+- **Multilingual.** English, Spanish, Portuguese, German, French, Chinese,
+  Japanese, Russian and Korean.
+
+## Repository
+
+| Directory | What it is |
+| --- | --- |
+| [`haru/`](haru/) | PyTorch implementation, web demo server, offline inference |
+| [`haru_mlx/`](haru_mlx/) | MLX implementation for Apple silicon, with a native macOS app |
+| [`haru_vllm/`](haru_vllm/) | Plugin that serves Haru with [vLLM-Omni](https://github.com/vllm-project/vllm-omni) |
+| [`client/`](client/) | Web client of the demo (React); a built copy ships inside the Python packages |
+
+All three read the same checkpoint,
+[`higurashi-ai/Haru-4B`](https://huggingface.co/higurashi-ai/Haru-4B).
+
+## Quick start
+
+With an NVIDIA GPU (about 12 GB of memory):
+
+```bash
+pip install -e haru
+python -m haru.server --hf-repo higurashi-ai/Haru-4B
+```
+
+Open <http://localhost:8998>, pick a character, give the model a voice, and
+talk. Use headphones, otherwise the model hears itself. A browser only gives a
+page microphone access on `localhost` or over HTTPS.
+
+To let someone else try it, add `--share` (`pip install -e "haru[share]"`): the
+server prints a public HTTPS link that tunnels to it. Anyone with the link can
+use the demo, and the traffic passes through Gradio's share servers.
+
+**Bring your own voice.** Haru ships without voice clips. In the demo, upload
+or record a clip of the voice the model should speak with: one speaker, 3
+seconds to 3 minutes, clean speech. In Python, pass it as `reference`. Only
+use voices you have the right to use.
+
+On a Mac with Apple silicon:
+
+```bash
+pip install -e haru_mlx
+python -m haru_mlx.server
+```
+
+## Python
+
+```python
+from haru import DuplexSession, HaruModel
+from haru.audio import load_audio, prepare_reference
+
+model = HaruModel.from_pretrained("higurashi-ai/Haru-4B")
+voice = prepare_reference(load_audio("voice.wav"))
+session = DuplexSession(model, system_prompt=card, reference=voice)
+
+frame = session.start()                  # the model's first 133 ms: frame.audio, frame.text
+while not frame.done:
+    frame = session.step(user_audio)     # 3200 samples at 24 kHz in, 3200 out
+```
+
+The model is one frame ahead of the user: `start()` returns frame 0, and each
+`step()` with user frame `k` returns model frame `k + 1`.
+
+### The system prompt
+
+Haru was trained with character cards in a fixed layout, and follows them much
+better than free-form instructions. Build one with `render_card`:
+
+```python
+from haru.prompt import card_templates, render_card
+
+card = render_card(
+    {
+        "persona": "Haru is a 29-year-old nurse in Denver. She is warm, chatty and laughs easily.",
+        "name": "Haru",
+        "gender": "female",
+        "other_name": "Sam",
+        "relationship": "Old friends from high school.",
+        "situation": "A phone call to catch up after a long time.",
+    },
+    card_templates()["templates"]["en"],
+)
+```
+
+### Offline
+
+```bash
+haru-inference user.wav reply.wav --reference voice.wav --system-prompt "$(cat card.txt)" --stereo
+```
+
+## Serving with vLLM-Omni
+
+For many concurrent conversations and the lowest latency on a GPU server, see
+[`haru_vllm/`](haru_vllm/). The web demo can use it as its engine:
+
+```bash
+python -m haru.server --backend vllm --vllm-url http://localhost:8000
+```
+
+## How it works
+
+```
+position t:   text[t] + model_audio[t] + user_audio[t]      (summed embeddings)
+                  │
+            language model  (Qwen3.5-4B backbone)
+                  │ hidden[t]
+        ┌─────────┴──────────┐
+   text[t+1]           audio latent[t+1]  ──► codec decoder ──► 3200 samples
+ (output embedding)     (MeanFlow head)
+```
+
+- The **text stream** carries the model's words in chunks. Frames without text
+  hold a padding token, and an end-of-padding token on the frame before the
+  model starts to speak.
+- The **audio codec** is the causal VibeVoice acoustic tokenizer: 24 kHz audio
+  to and from one latent per 3200 samples.
+- The **prompt** is the character card as a system turn, followed by the voice
+  reference as audio on the model's stream.
+
+## Limitations
+
+Haru-4B is a pretrained base model, released for research. It
+was trained on real conversations, not on assistant-style dialogue: it holds a
+natural conversation, but it is not a reliable source of facts and does not
+follow instructions the way an assistant does. It can imitate the voice of a
+reference clip; only use voices you have the right to use.
+
+## License
+
+The code and the Haru-4B weights are released under the Apache License 2.0.
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the third-party work
+they include.
+
+## Acknowledgments
+
+Haru builds on the work of many open-source projects. We are grateful to their
+authors and communities.
+
+- [Qwen](https://github.com/QwenLM) — the Qwen3.5 language model that Haru-4B
+  starts from.
+- [VibeVoice](https://github.com/microsoft/VibeVoice) — the causal acoustic
+  tokenizer Haru uses as its audio codec, and the idea of next-latent
+  generation at 7.5 Hz.
+- [Moshi](https://github.com/kyutai-labs/moshi) — the pioneering full-duplex
+  speech model. Our web client is derived from the Moshi web client.
+- [Improved MeanFlow](https://github.com/Lyy-iiis/imeanflow) — the one-step
+  generative modeling framework behind the audio head.
+- [vLLM](https://github.com/vllm-project/vllm) and
+  [vLLM-Omni](https://github.com/vllm-project/vllm-omni) — the serving engine
+  and its full-duplex realtime framework, which `haru_vllm` plugs into.
+- [MLX](https://github.com/ml-explore/mlx),
+  [mlx-lm](https://github.com/ml-explore/mlx-lm) and
+  [mlx-audio](https://github.com/Blaizzy/mlx-audio) — the array framework and
+  the model code `haru_mlx` builds on.

@@ -18,6 +18,20 @@ web demo.
 - **Multilingual.** English, Spanish, Portuguese, German, French, Chinese,
   Japanese, Russian and Korean.
 
+## How it works
+
+<p align="center">
+  <img src="assets/architecture.svg" width="720" alt="Haru-4B architecture: in every 133 ms frame, the user's speech latent, the model's previous text token and its previous speech latent are summed into one position of the language model, whose output predicts the next text token and the next speech latent.">
+</p>
+
+- The **text stream** carries the model's words in chunks. Frames without text
+  hold a padding token, and an end-of-padding token on the frame before the
+  model starts to speak.
+- The **audio codec** is the causal VibeVoice acoustic tokenizer: 24 kHz audio
+  to and from one latent per 3200 samples.
+- The **prompt** is the character card as a system turn, followed by the voice
+  reference as audio on the model's stream.
+
 ## Repository
 
 | Directory | What it is |
@@ -125,20 +139,6 @@ implementations that give the same results:
 | `haru` (NVIDIA GPUs) | [Triton](https://github.com/triton-lang/triton) kernels replayed from CUDA graphs ([`haru/haru/codec_triton`](haru/haru/codec_triton)) | The audio codec: about 0.7 ms instead of 6 ms to encode or decode a frame. Opt-in with `DuplexConfig(codec_backend="triton")` |
 | `haru_vllm` | The same Triton codec, used automatically | Audio encode and decode inside the engine step |
 | `haru_mlx` (Apple silicon) | Metal kernels ([`gated_delta.py`](haru_mlx/haru_mlx/models/gated_delta.py), [`vibevoice_codec.py`](haru_mlx/haru_mlx/models/vibevoice_codec.py)) | The Gated DeltaNet recurrence of the language model and the depthwise convolutions of the codec |
-
-## How it works
-
-<p align="center">
-  <img src="assets/architecture.svg" width="720" alt="Haru-4B architecture: in every 133 ms frame, the user's speech latent, the model's previous text token and its previous speech latent are summed into one position of the language model, whose output predicts the next text token and the next speech latent.">
-</p>
-
-- The **text stream** carries the model's words in chunks. Frames without text
-  hold a padding token, and an end-of-padding token on the frame before the
-  model starts to speak.
-- The **audio codec** is the causal VibeVoice acoustic tokenizer: 24 kHz audio
-  to and from one latent per 3200 samples.
-- The **prompt** is the character card as a system turn, followed by the voice
-  reference as audio on the model's stream.
 
 ## Limitations
 

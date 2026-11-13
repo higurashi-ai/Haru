@@ -1,0 +1,131 @@
+# Publish one package to PyPI with Trusted Publishing.
+#
+# A maintainer starts it from main with the package, the version and the commit.
+# The build job checks and builds that commit and writes what is about to be
+# published to the run summary. The publish job runs in the `pypi` environment,
+# which waits for another maintainer to approve it, and uploads the files the
+# build job made.
+
+name: Release to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        options:
+          - haru-speech
+          - haru-speech-mlx
+          - haru-speech-vllm
+      version:
+        description: Version to publish (must match __version__ at the commit), e.g. 0.1.0
+        required: true
+      commit:
+        description: Full 40-character SHA of the commit on main to publish
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE: ${{ inputs.package }}
+      VERSION: ${{ inputs.version }}
+      COMMIT: ${{ inputs.commit }}
+    steps:
+      - name: Check the inputs
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          # Required reviewers on the environment only apply to public repositories on our plan.
+          [ "$PRIVATE" = false ] || { echo "::error::The repository is private, so the approval step would not apply"; exit 1; }
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Run this workflow from main"; exit 1; }
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Give the commit as a full 40-character SHA"; exit 1; }
+          if curl -sf "https://pypi.org/pypi/$PACKAGE/$VERSION/json" > /dev/null; then
+            echo "::error::$PACKAGE $VERSION is already on PyPI"; exit 1
+          fi
+          case "$PACKAGE" in
+            haru-speech) dir=haru ;;
+            haru-speech-mlx) dir=haru_mlx ;;
+            haru-speech-vllm) dir=haru_vllm ;;
+          esac
+          echo "PKG_DIR=$dir" >> "$GITHUB_ENV"
+          echo "DIST_NAME=${PACKAGE//-/_}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that the commit is on main
+        run: git merge-base --is-ancestor "$COMMIT" origin/main
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+
+      - name: Build and check
+        run: |
+          python -m pip install build twine
+          python -m build "$PKG_DIR" --outdir dist
+          twine check --strict dist/*
+          # The version comes from __version__, so the file names confirm it matches the input.
+          ls "dist/$DIST_NAME-$VERSION.tar.gz" "dist/$DIST_NAME-$VERSION-"*.whl
+
+      - name: Summarize the release for the approver
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match "$PACKAGE-v*" "$COMMIT" 2>/dev/null || true)
+          {
+            echo "## $PACKAGE $VERSION"
+            echo "- Commit: \`$COMMIT\`"
+            if [ -n "$prev" ]; then
+              echo "- Changes since the last release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$prev...$COMMIT"
+            else
+              echo "- No earlier release tag: this is the first release of $PACKAGE"
+            fi
+            echo '```'
+            (cd dist && sha256sum -- *)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/${{ inputs.package }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  tag:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Create the tag through the API, so no checkout keeps a token with write access.
+      - name: Tag the published commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$PACKAGE-v$VERSION" -f sha="$COMMIT" > /dev/null

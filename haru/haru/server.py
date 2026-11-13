@@ -230,7 +230,7 @@ class DemoServer:
 
     async def handle_asset(self, request: web.Request) -> web.StreamResponse:
         name = request.match_info["name"]
-        if ".." in Path(name).parts:
+        if Path(name).is_absolute() or ".." in Path(name).parts:
             raise web.HTTPNotFound()
         return self._file(self.static_dir / "assets" / name)
 

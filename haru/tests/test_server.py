@@ -296,6 +296,7 @@ def test_static_client(tmp_path):
         assert script.status == 200 and "javascript" in script.content_type
         assert (await client.get("/assets/missing.js")).status == 404
         assert (await client.get("/assets/../index.html")).status == 404
+        assert (await client.get(f"/assets/{tmp_path}/index.html")).status == 404
 
     run(scenario, static_dir=tmp_path)
 

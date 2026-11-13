@@ -587,6 +587,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=25, help="text sampling top-k")
     parser.add_argument("--seed", type=int, help="fixed sampling seed for every conversation")
     parser.add_argument("--warmup-frames", type=int, default=16, help="frames of the warm-up conversation after loading (0: none)")
+    codec = parser.add_argument_group("audio codec of the local backend")
+    codec.add_argument(
+        "--codec-backend", choices=("torch", "triton", "auto"), default="torch",
+        help="PyTorch modules, Triton kernels replayed from CUDA graphs (needs triton, CUDA and bfloat16), "
+        "or Triton when usable",
+    )
+    codec.add_argument(
+        "--codec-num-stages", type=int, choices=(1, 2, 3),
+        help="pipeline depth of the Triton convolutions (default: per convolution, the deepest of 3-1 that fits)",
+    )
     parser.add_argument(
         "--network-profile", choices=sorted(NETWORK_PROFILES), default="internet",
         help="buffering between browser and server: 'local' (same machine or LAN) keeps thinner buffers",
@@ -624,7 +634,10 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--backend vllm needs --vllm-url")
         backend: Backend = VllmBackend(args.vllm_url)
     else:
-        backend = LocalBackend(args.model or args.hf_repo or DEFAULT_REPO, args.device, args.warmup_frames)
+        backend = LocalBackend(
+            args.model or args.hf_repo or DEFAULT_REPO, args.device, args.warmup_frames,
+            codec_backend=args.codec_backend, codec_num_stages=args.codec_num_stages,
+        )
     if args.webrtc == "on" and webrtc is None:
         parser.error('--webrtc on needs the optional dependencies: pip install -e "./haru[webrtc]" from the repository')
     options = ServerOptions(

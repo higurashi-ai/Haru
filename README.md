@@ -148,7 +148,7 @@ implementations that give the same results:
 
 | Where | Kernel | What it speeds up |
 | --- | --- | --- |
-| `haru` (NVIDIA GPUs) | [Triton](https://github.com/triton-lang/triton) kernels replayed from CUDA graphs ([`haru/haru/codec_triton`](haru/haru/codec_triton)) | The audio codec: about 0.7 ms instead of 6 ms to encode or decode a frame. Opt-in with `DuplexConfig(codec_backend="triton")` |
+| `haru` (NVIDIA GPUs) | [Triton](https://github.com/triton-lang/triton) kernels replayed from CUDA graphs ([`haru/haru/codec_triton`](haru/haru/codec_triton)) | The audio codec: about 0.7 ms instead of 6 ms to encode or decode a frame. Opt-in with `DuplexConfig(codec_backend="triton")` or `--codec-backend triton` |
 | `haru_vllm` | The same Triton codec, used automatically | Audio encode and decode inside the engine step |
 | `haru_mlx` (Apple silicon) | Metal kernels ([`gated_delta.py`](haru_mlx/haru_mlx/models/gated_delta.py), [`vibevoice_codec.py`](haru_mlx/haru_mlx/models/vibevoice_codec.py)) | The Gated DeltaNet recurrence of the language model and the depthwise convolutions of the codec |
 

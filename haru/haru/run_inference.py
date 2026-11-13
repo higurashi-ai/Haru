@@ -37,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--speak-first", action="store_true", help="the model opens the conversation")
     parser.add_argument("--stereo", action="store_true", help="write the user on the left channel and the model on the right")
     parser.add_argument("--transcript", type=Path, help="write per-frame text as JSON lines")
+    codec = parser.add_argument_group("audio codec")
+    codec.add_argument(
+        "--codec-backend", choices=("torch", "triton", "auto"), default="torch",
+        help="PyTorch modules, Triton kernels replayed from CUDA graphs (needs triton, CUDA and bfloat16), "
+        "or Triton when usable",
+    )
+    codec.add_argument(
+        "--codec-num-stages", type=int, choices=(1, 2, 3),
+        help="pipeline depth of the Triton convolutions (default: per convolution, the deepest of 3-1 that fits)",
+    )
     return parser
 
 
@@ -61,6 +71,8 @@ def main(argv: list[str] | None = None) -> None:
         speak_first=args.speak_first,
         max_frames=count + 1,
         seed=args.seed,
+        codec_backend=args.codec_backend,
+        codec_num_stages=args.codec_num_stages,
     )
     session = DuplexSession(model, system_prompt, reference, config)
 

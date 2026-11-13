@@ -41,7 +41,8 @@ class DuplexConfig:
     max_frames: int = 27_000  # 60 minutes
     reference_seconds: float = 180.0
     seed: int | None = None
-    codec_backend: str = "torch"  # "torch", or "triton" (faster; needs the triton package)
+    codec_backend: str = "torch"  # "torch", "triton" (faster; needs the triton package) or "auto"
+    codec_num_stages: int | None = None  # pipeline depth of the Triton codec (1-3); None: the deepest that fits
 
 
 @dataclass
@@ -82,7 +83,9 @@ class DuplexSession:
         self.prompt_length = 0
         self._generator = torch.Generator(device=model.device)
         self._cache = None
-        self._codec = open_stream(model.codec, backend=self.config.codec_backend)
+        self._codec = open_stream(
+            model.codec, backend=self.config.codec_backend, num_stages=self.config.codec_num_stages
+        )
         self._token: torch.Tensor | None = None
         self._latent: torch.Tensor | None = None
         self._force_text = 0

@@ -103,11 +103,22 @@ class LocalBackend:
     share the model take turns frame by frame.
     """
 
-    def __init__(self, model: str = DEFAULT_REPO, device: str | None = None, warmup_frames: int = 16):
-        """``model``: a checkpoint directory or a Hugging Face repository id."""
+    def __init__(
+        self,
+        model: str = DEFAULT_REPO,
+        device: str | None = None,
+        warmup_frames: int = 16,
+        codec_backend: str = "torch",
+        codec_num_stages: int | None = None,
+    ):
+        """``model``: a checkpoint directory or a Hugging Face repository id.
+
+        ``codec_backend`` / ``codec_num_stages``: as in :class:`DuplexConfig`."""
         self.model_path = model
         self.device = device
         self.warmup_frames = warmup_frames
+        self.codec_backend = codec_backend
+        self.codec_num_stages = codec_num_stages
         self.model = None
         self._ready = False
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="haru-model")
@@ -137,6 +148,8 @@ class LocalBackend:
             speak_first=settings.speak_first,
             max_frames=settings.max_frames,
             seed=settings.seed,
+            codec_backend=self.codec_backend,
+            codec_num_stages=self.codec_num_stages,
         )
         return DuplexSession(self.model, settings.system_prompt, settings.reference, config)
 

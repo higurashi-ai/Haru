@@ -70,4 +70,5 @@ before the forward pass, and the MeanFlow head and codec decoder run right
 after sampling, so a frame's audio leaves in the step that produced it. The
 codec runs as Triton kernels replayed from CUDA graphs when `triton` is
 installed (PyTorch's Linux CUDA wheels install it), and in plain PyTorch
-otherwise.
+otherwise. Set `HARU_CODEC_BACKEND=torch` (or `triton`) in the environment of
+`vllm serve` to override that choice.

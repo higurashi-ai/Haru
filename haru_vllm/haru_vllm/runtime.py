@@ -13,6 +13,8 @@ forward -> ``adjust_logits`` -> sampler -> ``record_sampled`` -> ``finish_step``
 from __future__ import annotations
 
 import base64
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -20,12 +22,26 @@ import numpy as np
 import torch
 
 from haru.models.loaders import load_tokenizer
-from haru.models.vibevoice_codec import open_stream
+from haru.models.vibevoice_codec import CODEC_BACKENDS, open_stream
 from haru.prompt import build_prompt, silence_latent
 from haru.sampling import DryConfig, DryState
 
 if TYPE_CHECKING:
     from .model import HaruForConditionalGeneration
+
+
+def codec_options(environ: Mapping[str, str] = os.environ) -> tuple[str, int | None]:
+    """Codec backend and Triton pipeline depth of the engine, from ``HARU_CODEC_BACKEND``
+    (torch / triton / auto, default auto) and ``HARU_CODEC_NUM_STAGES`` (1-3, default: what fits the GPU)."""
+    backend = environ.get("HARU_CODEC_BACKEND", "").strip() or "auto"
+    if backend not in CODEC_BACKENDS:
+        raise ValueError(f"HARU_CODEC_BACKEND must be one of {', '.join(CODEC_BACKENDS)}, got {backend!r}")
+    stages = environ.get("HARU_CODEC_NUM_STAGES", "").strip()
+    if not stages:
+        return backend, None
+    if stages not in ("1", "2", "3"):
+        raise ValueError(f"HARU_CODEC_NUM_STAGES must be 1, 2 or 3, got {stages!r}")
+    return backend, int(stages)
 
 
 @dataclass
@@ -79,6 +95,7 @@ class HaruRuntime:
         self._model_path = model_path
         self._tokenizer = None
         self._conversations: dict[str, _Conversation] = {}
+        self._codec_backend, self._codec_num_stages = codec_options()
         config = model.haru_config
         self._frame_samples = config.frame_samples
         self._stream_ids = [config.pad_token_id, config.eop_token_id]
@@ -90,7 +107,7 @@ class HaruRuntime:
         """Run every audio code path once, so the first conversation starts without a delay."""
         model = self._model
         self._tokenizer = load_tokenizer(self._model_path)
-        stream = open_stream(model.codec, backend="auto")
+        stream = self._open_codec()
         frame = torch.zeros(1, self._frame_samples)
         for _ in range(2):
             stream.decode(model.codec.sample(stream.encode(frame)).float())
@@ -143,6 +160,9 @@ class HaruRuntime:
             raise RuntimeError("a live frame is exactly one position")
         return self._frame_embeds(conversation, duplex)
 
+    def _open_codec(self):
+        return open_stream(self._model.codec, backend=self._codec_backend, num_stages=self._codec_num_stages)
+
     def _open(self, duplex: dict[str, Any]) -> _Conversation:
         model = self._model
         if self._tokenizer is None:
@@ -162,7 +182,7 @@ class HaruRuntime:
         )
         return _Conversation(
             options=options,
-            codec=open_stream(model.codec, backend="auto"),
+            codec=self._open_codec(),
             generator=generator,
             prompt_embeds=embeds,
             prompt_length=prompt.length,

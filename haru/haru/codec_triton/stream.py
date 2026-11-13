@@ -41,9 +41,11 @@ def _layers(modules: list[nn.Module]) -> list[Layer]:
     return layers
 
 
-def _run(layers: list[Layer], x: torch.Tensor, state: list[torch.Tensor],
-         new_state: list[torch.Tensor]) -> torch.Tensor:
-    """Run ``layers`` on x ``[B, T, C]``, reading ``state`` and writing every tensor of ``new_state``."""
+def _run(layers: list[Layer], x: torch.Tensor, state: list[torch.Tensor], new_state: list[torch.Tensor],
+         num_stages: int | None = None) -> torch.Tensor:
+    """Run ``layers`` on x ``[B, T, C]``, reading ``state`` and writing every tensor of ``new_state``.
+
+    ``num_stages``: pipeline depth of the window-GEMM kernels (``None``: the deepest that fits the device)."""
     normed = None  # first RMSNorm of the next block, when the previous kernel already produced it
     for i, (function, params, _) in enumerate(layers):
         following = layers[i + 1] if i + 1 < len(layers) else None
@@ -53,7 +55,7 @@ def _run(layers: list[Layer], x: torch.Tensor, state: list[torch.Tensor],
             x, normed = function(params, x, state[i], new_state[i], normed, next_norm)
         else:
             eps = 0.0 if next_block is None else next_block["eps"]
-            x, normed = function(params, x, state[i], new_state[i], next_norm, eps)
+            x, normed = function(params, x, state[i], new_state[i], next_norm, eps, num_stages)
     return x
 
 
@@ -61,8 +63,9 @@ class _FrameGraph:
     """The one-frame step of one codec direction for a fixed batch, as CUDA graphs over static buffers."""
 
     def __init__(self, layers: list[Layer], batch: int, in_shape: tuple[int, int], out_shape: tuple[int, ...],
-                 device: torch.device, pool: tuple[int, int]):
+                 device: torch.device, pool: tuple[int, int], num_stages: int | None = None):
         self.layers, self.batch, self.out_shape, self.pool = layers, batch, out_shape, pool
+        self.num_stages = num_stages
         self.input = torch.zeros(batch, *in_shape, device=device, dtype=torch.bfloat16)
         self.states = [[torch.zeros(batch, *shape, device=device, dtype=torch.bfloat16) for *_, shape in layers]
                        for _ in range(2)]
@@ -76,13 +79,15 @@ class _FrameGraph:
         if self.graphs:
             return
         spare = 1 - self.current
-        _run(self.layers, self.input, self.states[self.current], self.states[spare])  # only overwrites `spare`
+        # only overwrites `spare`
+        _run(self.layers, self.input, self.states[self.current], self.states[spare], self.num_stages)
         graphs, outputs = [], []
         for source in (0, 1):
             graph = torch.cuda.CUDAGraph()
             # thread_local: other threads of the process may use CUDA during the capture
             with torch.cuda.graph(graph, pool=self.pool, capture_error_mode="thread_local"):
-                outputs.append(_run(self.layers, self.input, self.states[source], self.states[1 - source]))
+                outputs.append(_run(self.layers, self.input, self.states[source], self.states[1 - source],
+                                    self.num_stages))
             graphs.append(graph)
         self.graphs, self.outputs = graphs, outputs
 
@@ -126,14 +131,21 @@ class TritonCodecStream:
     disk, so later processes take about 1 s for their first stream and tens of milliseconds for
     each further one.
 
+    ``num_stages`` is the software-pipeline depth of the strided and transposed convolutions (1-3).
+    ``None`` picks, per convolution, the deepest that fits the device's shared memory: 3 where it fits,
+    less on GPUs with little shared memory per block such as the RTX 4090 (99 KiB).
+
     Threading: a stream may be built in one thread and used from another, but calls on one stream
     must not overlap, and it cannot be called while its thread is capturing another CUDA graph. The
     codec's device must be the calling thread's current CUDA device.
     """
 
-    def __init__(self, codec: VibeVoiceCodec, batch: int = 1):
+    def __init__(self, codec: VibeVoiceCodec, batch: int = 1, num_stages: int | None = None):
         if codec.device.type != "cuda":
             raise ValueError("TritonCodecStream needs the codec on a CUDA device")
+        if num_stages is not None and num_stages not in kernels.WINDOW_STAGES:
+            raise ValueError(f"num_stages must be one of {kernels.WINDOW_STAGES} or None, got {num_stages!r}")
+        self.num_stages = num_stages
         self.codec = codec
         self.batch = batch
         self.frame_samples = codec.config.frame_samples
@@ -141,9 +153,9 @@ class TritonCodecStream:
         encoder, decoder = _codec_layers(codec)
         pool = torch.cuda.graph_pool_handle()
         self._encoder = _FrameGraph(encoder, batch, (self.frame_samples, 1), (batch, 1, self.latent_dim),
-                                    codec.device, pool)
+                                    codec.device, pool, num_stages)
         self._decoder = _FrameGraph(decoder, batch, (1, self.latent_dim), (batch, self.frame_samples),
-                                    codec.device, pool)
+                                    codec.device, pool, num_stages)
 
     def warmup(self) -> None:
         """Compile the kernels and capture both graphs now instead of on the first frame."""

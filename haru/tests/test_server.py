@@ -303,6 +303,12 @@ def test_static_client(tmp_path):
 def test_command_line():
     args = build_parser().parse_args(["--hf-repo", "higurashi-ai/Haru-4B"])
     assert (args.port, args.backend, args.max_sessions, args.webrtc) == (8998, "local", 1, "auto")
+    assert (args.codec_backend, args.codec_num_stages) == ("torch", None)
+    args = build_parser().parse_args(["--codec-backend", "triton", "--codec-num-stages", "2"])
+    assert (args.codec_backend, args.codec_num_stages) == ("triton", 2)
+    for wrong in (["--codec-backend", "cuda"], ["--codec-num-stages", "4"]):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(wrong)
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--model", "a", "--hf-repo", "b"])
     backend = VllmBackend("http://localhost:8000/")

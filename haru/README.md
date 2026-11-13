@@ -31,6 +31,8 @@ recent GPU, with the same output up to bfloat16 rounding. It is opt-in:
 session = DuplexSession(model, system_prompt=card, reference=voice, config=DuplexConfig(codec_backend="triton"))
 ```
 
+From the command line: `haru-server --codec-backend triton` (or `auto`: Triton when usable, else PyTorch).
+
 The first use in a new environment compiles the kernels (about 15 seconds).
 
 ## Layout

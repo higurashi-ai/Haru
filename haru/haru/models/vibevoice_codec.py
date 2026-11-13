@@ -249,20 +249,25 @@ class CodecStream:
         return audio
 
 
-def open_stream(codec: VibeVoiceCodec, batch: int = 1, backend: str = "torch"):
+CODEC_BACKENDS = ("torch", "triton", "auto")
+
+
+def open_stream(codec: VibeVoiceCodec, batch: int = 1, backend: str = "torch", num_stages: int | None = None):
     """A frame-by-frame codec stream for ``batch`` conversations.
 
     ``backend``: ``"torch"`` (default), ``"triton"`` (Triton kernels replayed
     from CUDA graphs: about ten times faster per frame) or ``"auto"``, which
     picks Triton when it is installed and the codec runs in bfloat16 on CUDA.
+    ``num_stages``: pipeline depth of the Triton convolutions (1-3; ``None``:
+    the deepest that fits the GPU's shared memory). The PyTorch codec ignores it.
     """
     from .. import codec_triton
 
-    if backend not in ("auto", "torch", "triton"):
+    if backend not in CODEC_BACKENDS:
         raise ValueError(f"unknown codec backend {backend!r}")
     usable = codec_triton.is_available() and codec.device.type == "cuda" and codec.dtype == torch.bfloat16
     if backend == "triton" and not usable:
         raise RuntimeError("the Triton codec backend needs triton and a bfloat16 codec on CUDA")
     if backend != "torch" and usable:
-        return codec_triton.TritonCodecStream(codec, batch)
+        return codec_triton.TritonCodecStream(codec, batch, num_stages)
     return CodecStream(codec, batch)

@@ -3,6 +3,7 @@
 
 import os
 import threading
+from importlib.util import find_spec
 
 import pytest
 import torch
@@ -39,6 +40,39 @@ def test_unknown_attribute_raises():
         codec_triton.missing
 
 
+@pytest.mark.skipif(find_spec("triton") is None, reason="needs triton")
+def test_launch_deepest_steps_down_and_remembers(monkeypatch):
+    """A depth whose pipeline does not fit raises OutOfResources at compile time; the next one is used."""
+    from triton.runtime.errors import OutOfResources
+
+    from haru.codec_triton import kernels
+
+    monkeypatch.setattr(kernels, "_WINDOW_STAGES", {})
+    tried = []
+
+    def launch(stages):
+        tried.append(stages)
+        if stages > 2:
+            raise OutOfResources(114_688, 101_376, "shared memory")
+
+    assert kernels.launch_deepest(("4090",), launch) == 2 and tried == [3, 2]
+    assert kernels.launch_deepest(("4090",), launch) == 2 and tried == [3, 2, 2]  # remembered
+    assert kernels.launch_deepest(("h100",), lambda stages: None) == 3
+
+    def never(stages):
+        raise OutOfResources(1, 0, "shared memory")
+
+    with pytest.raises(OutOfResources):
+        kernels.launch_deepest(("tiny",), never)
+
+
+def test_open_stream_rejects_unknown_backend():
+    from haru.models.vibevoice_codec import open_stream
+
+    with pytest.raises(ValueError):
+        open_stream(None, backend="cuda")
+
+
 @pytest.fixture(scope="module")
 def codec():
     from haru import HaruModel
@@ -62,12 +96,12 @@ def snr_db(reference: torch.Tensor, signal: torch.Tensor) -> float:
     return float(10 * torch.log10(reference.pow(2).sum() / (reference - signal).pow(2).sum()))
 
 
-def run_both(codec, audio: torch.Tensor, reset: tuple[int, list[int]] | None = None):
+def run_both(codec, audio: torch.Tensor, reset: tuple[int, list[int]] | None = None, num_stages: int | None = None):
     """Encode and decode ``audio [B, n * FRAME]`` one frame at a time on both backends (same latents decoded)."""
     from haru.models.vibevoice_codec import CodecStream
 
     reference = CodecStream(codec, audio.shape[0])
-    stream = codec_triton.TritonCodecStream(codec, audio.shape[0])
+    stream = codec_triton.TritonCodecStream(codec, audio.shape[0], num_stages)
     outputs: list[list[torch.Tensor]] = [[], [], [], []]
     for i in range(audio.shape[1] // FRAME):
         if reset is not None and i == reset[0]:
@@ -93,6 +127,21 @@ def test_matches_torch_stream(codec, batch):
     assert triton_wave.shape == wave.shape == (batch, frames * FRAME) and triton_wave.dtype == wave.dtype
     assert snr_db(means, triton_means) > 30
     assert snr_db(wave, triton_wave) > 30
+
+
+@gpu
+@pytest.mark.parametrize("num_stages", [1, 2])
+def test_explicit_pipeline_depth_matches_torch_stream(codec, num_stages):
+    frames = 20
+    means, triton_means, wave, triton_wave = run_both(codec, voice(frames, 0)[None], num_stages=num_stages)
+    assert snr_db(means, triton_means) > 30
+    assert snr_db(wave, triton_wave) > 30
+
+
+@gpu
+def test_invalid_pipeline_depth_raises(codec):
+    with pytest.raises(ValueError):
+        codec_triton.TritonCodecStream(codec, num_stages=4)
 
 
 @gpu

@@ -27,14 +27,18 @@ kernel, else ``None``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
+from triton.runtime.errors import OutOfResources
 
 FUSED_MAX_CHANNELS = 128  # widest block whose MLP runs inside the fused kernel
 CUBLAS_MIN_CHANNELS = 1024  # convs with at least this many input channels run as cuBLAS GEMMs
 NORM_MAX_CHANNELS = 256  # widest output a conv kernel holds in one tile, as the fused RMSNorm needs
+WINDOW_STAGES = (3, 2, 1)  # software-pipeline depths of the window GEMM, deepest (fastest) first
 
 Params = dict[str, torch.Tensor | int | float]
 
@@ -343,15 +347,51 @@ def _window_kernel(x_ptr, state_ptr, w_ptr, b_ptr, out_ptr, next_norm_w, hn_ptr,
         tl.store(hn_ptr + offs, hn.to(tl.bfloat16), mask=m)
 
 
+_WINDOW_STAGES: dict[tuple, int] = {}  # launch configuration -> deepest pipeline that fit the device
+
+
+def launch_deepest(key: tuple, launch: Callable[[int], None]) -> int:
+    """Call ``launch(num_stages)`` with the deepest depth in ``WINDOW_STAGES`` that fits the device; return it.
+
+    Triton raises ``OutOfResources`` while compiling a kernel whose pipeline needs more shared memory than the
+    device has, before anything runs, so a failed depth is skipped. The depth found is remembered for ``key``:
+    the eager step before a CUDA graph capture settles it, and the capture launches the same kernels."""
+    if key in _WINDOW_STAGES:
+        launch(_WINDOW_STAGES[key])
+        return _WINDOW_STAGES[key]
+    for stages in WINDOW_STAGES:
+        try:
+            launch(stages)
+        except OutOfResources:
+            if stages == WINDOW_STAGES[-1]:
+                raise
+            continue
+        _WINDOW_STAGES[key] = stages
+        return stages
+    raise AssertionError("unreachable")
+
+
 def _window(x: torch.Tensor, state: torch.Tensor, p: Params, out: torch.Tensor, norm_w: torch.Tensor,
-            normed: torch.Tensor, eps: float, *, K: int, S: int, NEXT_NORM: bool, NC: int) -> None:
-    """Launch ``_window_kernel`` for x ``[B, T_in, C_in]`` -> out ``[B, T_out, C_out]`` with its tile sizes."""
+            normed: torch.Tensor, eps: float, *, K: int, S: int, NEXT_NORM: bool, NC: int,
+            num_stages: int | None) -> None:
+    """Launch ``_window_kernel`` for x ``[B, T_in, C_in]`` -> out ``[B, T_out, C_out]`` with its tile sizes.
+
+    ``num_stages``: pipeline depth of the reduction loop, or ``None`` for the deepest that fits the device's
+    shared memory (3 where it fits; an RTX 4090, with 99 KiB per block, fits 2 for the widest tiles)."""
     (B, t_in, c_in), (_, t_out, c_out) = x.shape, out.shape
+    bt = 64
     bo = max(NC, 64) if NEXT_NORM else 64  # a fused RMSNorm needs whole groups of NC channels in a tile
     bk = next(n for n in (128, 64, 32) if (K * c_in) % n == 0 and n * bo <= 16384)  # operand tiles fit shared memory
-    _window_kernel[(triton.cdiv(t_out, 64), triton.cdiv(c_out, bo), B)](
-        x, state, p["w"], p["b"], out, norm_w, normed, t_in, t_out, eps, C_IN=c_in, C_OUT=c_out, K=K, S=S,
-        PAD=K - S, NEXT_NORM=NEXT_NORM, NC=NC, BT=64, BO=bo, BK=bk, num_warps=8, num_stages=3)
+
+    def launch(stages: int) -> None:
+        _window_kernel[(triton.cdiv(t_out, bt), triton.cdiv(c_out, bo), B)](
+            x, state, p["w"], p["b"], out, norm_w, normed, t_in, t_out, eps, C_IN=c_in, C_OUT=c_out, K=K, S=S,
+            PAD=K - S, NEXT_NORM=NEXT_NORM, NC=NC, BT=bt, BO=bo, BK=bk, num_warps=8, num_stages=stages)
+
+    if num_stages is None:
+        launch_deepest((x.device.index, c_in, c_out, K, S, NEXT_NORM, NC, bo, bk), launch)
+    else:
+        launch(num_stages)
 
 
 @triton.jit
@@ -388,10 +428,11 @@ def _keep_context(x: torch.Tensor, state: torch.Tensor, new_state: torch.Tensor)
 
 
 def conv(p: Params, x: torch.Tensor, state: torch.Tensor, new_state: torch.Tensor,
-         next_norm: torch.Tensor | None, eps: float) -> tuple[torch.Tensor, torch.Tensor | None]:
+         next_norm: torch.Tensor | None, eps: float, num_stages: int | None = None
+         ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """x ``[B, T_in, C_in]`` -> ``[B, T_in // stride, C_out]``; state / new_state ``[B, kernel - stride, C_in]``.
 
-    ``eps`` is the epsilon of the RMSNorm ``next_norm`` belongs to."""
+    ``eps`` is the epsilon of the RMSNorm ``next_norm`` belongs to; ``num_stages`` as in ``_window``."""
     B, t_in, c_in = x.shape
     K, S, c_out = p["kernel"], p["stride"], p["c_out"]
     t_out = t_in // S
@@ -413,7 +454,7 @@ def conv(p: Params, x: torch.Tensor, state: torch.Tensor, new_state: torch.Tenso
         _stem_kernel[(triton.cdiv(t_out, 256), B)](x, state, p["w"], p["b"], out, norm_w, normed, t_out, eps,
                                                    C_OUT=c_out, K=K, NEXT_NORM=fuse, BT=256, num_warps=4)
     else:
-        _window(x, state, p, out, norm_w, normed, eps, K=K, S=S, NEXT_NORM=fuse, NC=c_out)
+        _window(x, state, p, out, norm_w, normed, eps, K=K, S=S, NEXT_NORM=fuse, NC=c_out, num_stages=num_stages)
     return out, (normed if fuse else None)
 
 
@@ -436,8 +477,11 @@ def conv_transpose_params(module: torch.nn.Module) -> Params:
 
 
 def conv_transpose(p: Params, x: torch.Tensor, state: torch.Tensor, new_state: torch.Tensor,
-                   next_norm: torch.Tensor | None, eps: float) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """x ``[B, T, C_in]`` -> ``[B, T * stride, C_out]``; state / new_state ``[B, 1, C_in]`` (the last input frame)."""
+                   next_norm: torch.Tensor | None, eps: float, num_stages: int | None = None
+                   ) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """x ``[B, T, C_in]`` -> ``[B, T * stride, C_out]``; state / new_state ``[B, 1, C_in]`` (the last input frame).
+
+    ``num_stages`` as in ``_window``."""
     B, T, c_in = x.shape
     S, c_out = p["stride"], p["c_out"]
     _keep_context(x, state, new_state)
@@ -448,5 +492,6 @@ def conv_transpose(p: Params, x: torch.Tensor, state: torch.Tensor, new_state: t
     fuse = next_norm is not None and c_out <= NORM_MAX_CHANNELS
     out = torch.empty(B, T, S * c_out, device=x.device, dtype=x.dtype)
     normed = torch.empty_like(out) if fuse else out
-    _window(x, state, p, out, next_norm if fuse else p["b"], normed, eps, K=2, S=1, NEXT_NORM=fuse, NC=c_out)
+    _window(x, state, p, out, next_norm if fuse else p["b"], normed, eps, K=2, S=1, NEXT_NORM=fuse, NC=c_out,
+            num_stages=num_stages)
     return out.view(B, T * S, c_out), (normed.view(B, T * S, c_out) if fuse else None)

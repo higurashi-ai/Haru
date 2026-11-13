@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "higurashi" }]
 requires-python = ">=3.11"
 dynamic = ["version"]
-dependencies = ["haru-speech", "vllm>=0.32", "vllm-omni>=0.32"]
+dependencies = ["haru-speech>=0.1.1", "vllm>=0.32", "vllm-omni>=0.32"]
 
 [project.urls]
 Homepage = "https://higurashi.ai"

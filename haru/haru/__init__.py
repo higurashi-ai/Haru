@@ -4,5 +4,5 @@ from .config import HaruConfig
 from .models import HaruModel, load_model
 from .session import DuplexConfig, DuplexSession, Frame
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["DuplexConfig", "DuplexSession", "Frame", "HaruConfig", "HaruModel", "load_model"]

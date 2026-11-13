@@ -8,7 +8,7 @@ Installing this package is enough: vLLM calls :func:`register` through the
 serves ``/v1/realtime?duplex=1``.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 ARCHITECTURE = "HaruForConditionalGeneration"
 _registered = False

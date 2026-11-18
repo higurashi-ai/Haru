@@ -4,13 +4,15 @@
 
 Serves the web client and its API. A conversation is registered with
 ``POST /api/session`` (system prompt, voice, settings) and then runs over one
-of two transports:
+of three transports:
 
 * ``GET /api/chat?session_id=...`` — a WebSocket of binary messages, one kind
   byte followed by the payload: ``0x00`` handshake (server, once the
   conversation can start), ``0x01`` Ogg/Opus pages (24 kHz mono, both
   directions), ``0x02`` UTF-8 text of the model, ``0x06`` ping.
 * ``POST /api/webrtc/offer?session_id=...`` — WebRTC (see :mod:`haru.webrtc`).
+* ``GET /api/twilio`` — Twilio Media Streams. The ``start`` message's
+  ``customParameters.session_id`` selects the registered conversation.
 
 The model stays one frame ahead of the user: frame 0 is sent with the
 handshake, and frame ``k + 1`` as soon as user frame ``k`` (133 ms) has
@@ -24,8 +26,8 @@ import asyncio
 import json
 import logging
 import math
-import secrets
 import mimetypes
+import secrets
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -38,6 +40,7 @@ import numpy as np
 import sphn
 from aiohttp import web
 
+from . import twilio
 from .audio import SAMPLE_RATE, decode_audio, prepare_reference, trim_silence
 from .backends import Backend, Conversation, LocalBackend, SessionSettings, VllmBackend
 from .models.loaders import DEFAULT_REPO
@@ -194,6 +197,7 @@ class DemoServer:
         app.router.add_post("/api/reference_audio", self.handle_reference_upload)
         app.router.add_post("/api/session", self.handle_create_session)
         app.router.add_get("/api/chat", self.handle_chat)
+        app.router.add_get("/api/twilio", self.handle_twilio)
         app.router.add_get("/api/webrtc/config", self.handle_webrtc_config)
         app.router.add_post("/api/webrtc/offer", self.handle_webrtc_offer)
         app.router.add_post("/api/webrtc/cancel", self.handle_webrtc_cancel)
@@ -465,6 +469,92 @@ class DemoServer:
         finally:
             pinger.cancel()
         return frames
+
+    # ------------------------------------------------------ Twilio Streams
+
+    async def handle_twilio(self, request: web.Request) -> web.WebSocketResponse:
+        """Run a conversation over the Twilio bidirectional Media Streams wire protocol."""
+        ws = web.WebSocketResponse(receive_timeout=CLIENT_SILENCE_SECONDS)
+        await ws.prepare(request)
+        start = None
+        try:
+            while start is None:
+                message = await ws.receive()
+                if message.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    return ws
+                if message.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    start = twilio.parse_start(json.loads(message.data))
+                except ValueError:
+                    continue
+        except asyncio.TimeoutError:
+            await ws.close(code=1008, message=b"start timeout")
+            return ws
+
+        settings = self.sessions.get(start.session_id)
+        if settings is None or not self.backend.ready():
+            await ws.close(code=1008, message=b"session unavailable")
+            return ws
+
+        async with self.slots:
+            if ws.closed:
+                return ws
+            conversation = None
+            frames = 0
+            incoming = twilio.InputAudio(FRAME_SAMPLES)
+            outgoing = twilio.OutputAudio(start.stream_sid)
+
+            async def send(frame: Frame) -> None:
+                for response in outgoing.push(frame.audio):
+                    await ws.send_json(response)
+
+            try:
+                conversation, first = await self._begin(start.session_id, settings)
+                logger.info("session %s: Twilio conversation started", start.session_id[:8])
+                await send(first)
+                async for message in ws:
+                    if message.type != aiohttp.WSMsgType.TEXT:
+                        continue
+                    try:
+                        event = json.loads(message.data)
+                    except ValueError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("event") == "stop":
+                        break
+                    media = event.get("media")
+                    if event.get("event") != "media" or not isinstance(media, dict):
+                        continue
+                    payload = media.get("payload")
+                    if not isinstance(payload, str):
+                        continue
+                    try:
+                        user_frames = incoming.push(payload)
+                    except (ValueError, TypeError):
+                        await ws.close(code=1007, message=b"invalid media")
+                        break
+                    for user_frame in user_frames:
+                        frame = await conversation.step(user_frame)
+                        frames += 1
+                        await send(frame)
+                        if frame.done:
+                            await ws.close()
+                            break
+                logger.info("session %s: Twilio conversation ended after %d frames", start.session_id[:8], frames)
+            except (ConnectionError, asyncio.TimeoutError):
+                pass
+            except Exception:
+                logger.exception("session %s: Twilio conversation failed", start.session_id[:8])
+                if not ws.closed:
+                    await ws.close(code=1011, message=b"conversation failed")
+            finally:
+                if conversation is not None:
+                    await conversation.close()
+        if not ws.closed:
+            await ws.close()
+        return ws
 
     # -------------------------------------------------------------- WebRTC
 

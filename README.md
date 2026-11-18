@@ -78,6 +78,27 @@ To give the demo a default voice, save a clip as
 restart the server: the demo then offers it as the default voice of that
 language. Without the file, the demo does not show the option.
 
+### Twilio Media Streams
+
+The server accepts Twilio's bidirectional Media Streams protocol at
+`wss://<host>/api/twilio`. Create a conversation with `POST /api/session`, then
+pass the returned id as a Stream parameter:
+
+```xml
+<Response>
+  <Connect>
+    <Stream url="wss://haru.example.com/api/twilio">
+      <Parameter name="session_id" value="the-id-from-api-session"/>
+    </Stream>
+  </Connect>
+</Response>
+```
+
+The transport converts Twilio's G.711 mu-law audio at 8 kHz to Haru's 24 kHz
+model frames and converts replies back to fixed 20 ms Media Streams packets.
+The session id is an access token: keep it private, use TLS, and create a fresh
+session for each call.
+
 On a Mac with Apple silicon, build the native app (see
 [`haru_mlx/swift`](haru_mlx/swift/README.md)):
 

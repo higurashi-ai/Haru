@@ -35,6 +35,7 @@ struct HaruButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         CapsuleLabel(configuration: configuration, filled: selected || accent, large: large)
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private struct CapsuleLabel: View {
@@ -75,6 +76,7 @@ struct FieldBox<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
             content
         }
     }
@@ -100,6 +102,7 @@ struct HaruTextField: View {
     var body: some View {
         FieldBox(label: label) {
             TextField("", text: $text)
+                .accessibilityLabel(Text(label))
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($focused)
@@ -119,6 +122,7 @@ struct HaruTextEditor: View {
     var body: some View {
         FieldBox(label: label) {
             TextEditor(text: $text)
+                .accessibilityLabel(Text(label))
                 .font(.system(size: 14))
                 .scrollContentBackground(.hidden)
                 .focused($focused)
@@ -130,30 +134,25 @@ struct HaruTextEditor: View {
 }
 
 struct HaruSelect: View {
+    let label: String
     let options: [(String, String)]
     @Binding var selection: String
 
     var body: some View {
-        // The whole field opens the menu: a plain button-style menu draws this
-        // label as is, where a borderless one only answers clicks on its text.
-        Menu {
-            ForEach(options, id: \.0) { tag, label in Button(label) { selection = tag } }
-        } label: {
-            HStack(spacing: 8) {
-                Text(options.first { $0.0 == selection }?.1 ?? selection).font(.system(size: 14))
-                    .foregroundStyle(Theme.ink).lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+        FieldBox(label: label) {
+            Picker(label, selection: $selection) {
+                if !options.contains(where: { $0.0 == selection }) {
+                    Text(selection.isEmpty ? t("option.unspecified") : selection).tag(selection)
+                }
+                ForEach(options, id: \.0) { tag, title in
+                    Text(title).tag(tag)
+                }
             }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .contentShape(Rectangle())
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.large)
+            .disabled(options.isEmpty)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .modifier(FieldChrome())
     }
 }
 
@@ -164,6 +163,7 @@ struct SectionTitle: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.system(size: 20, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
             if !note.isEmpty {
                 Text(note).font(.system(size: 13)).foregroundStyle(Theme.muted)
             }
@@ -331,25 +331,24 @@ struct SetupView: View {
                     }
                 }
             }
-            FieldBox(label: t("field.language")) {
-                HaruSelect(options: model.languages.map { ($0.code, $0.label) },
-                            selection: Binding(get: { model.language }, set: { model.selectLanguage($0) }))
+            VStack(alignment: .leading, spacing: 6) {
+                HaruSelect(label: t("field.language"), options: model.languages.map { ($0.code, $0.label) },
+                           selection: Binding(get: { model.language }, set: { model.selectLanguage($0) }))
+                Text(t("field.languageNote")).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
             // Labels from your side; the model's prompt keeps the
             // template's own headers (its name as "your name", yours as "the other's").
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .bottom, spacing: 14) {
                 HaruTextField(label: t("field.modelName"), text: $model.card.name)
                 HaruTextField(label: t("field.yourName"), text: $model.card.otherName)
             }
-            HStack(alignment: .top, spacing: 14) {
-                FieldBox(label: t("field.gender")) {
-                    HaruSelect(options: [("", t("option.unspecified")), ("female", t("option.female")), ("male", t("option.male"))],
-                                selection: $model.card.gender)
-                }
-                FieldBox(label: t("field.backchannel")) {
-                    HaruSelect(options: [("", t("option.unspecified")), ("low", t("backchannel.low")), ("mid", t("backchannel.mid")), ("high", t("backchannel.high"))],
-                                selection: $model.card.backchannel)
-                }
+            HStack(alignment: .bottom, spacing: 14) {
+                HaruSelect(label: t("field.gender"),
+                           options: [("", t("option.unspecified")), ("female", t("option.female")), ("male", t("option.male"))],
+                           selection: $model.card.gender)
+                HaruSelect(label: t("field.backchannel"),
+                           options: [("", t("option.unspecified")), ("low", t("backchannel.low")), ("mid", t("backchannel.mid")), ("high", t("backchannel.high"))],
+                           selection: $model.card.backchannel)
             }
             HaruTextEditor(label: t("field.persona"), text: $model.card.persona, height: 110)
             HaruTextEditor(label: t("field.relationship"), text: $model.card.relationship, height: 64)
@@ -400,13 +399,9 @@ struct SetupView: View {
     private var settingsSection: some View {
         Card {
             SectionTitle(title: t("settings.title"), note: "")
-            HStack(alignment: .top, spacing: 14) {
-                FieldBox(label: t("settings.microphone")) {
-                    HaruSelect(options: model.inputDevices.map { ($0, $0) }, selection: $model.inputDevice)
-                }
-                FieldBox(label: t("settings.output")) {
-                    HaruSelect(options: model.outputDevices.map { ($0, $0) }, selection: $model.outputDevice)
-                }
+            HStack(alignment: .bottom, spacing: 14) {
+                HaruSelect(label: t("settings.microphone"), options: model.inputDevices.map { ($0, $0) }, selection: $model.inputDevice)
+                HaruSelect(label: t("settings.output"), options: model.outputDevices.map { ($0, $0) }, selection: $model.outputDevice)
             }
             deviceAdvice
             Button(t("settings.rescan")) { model.refreshDevices() }
@@ -414,19 +409,24 @@ struct SetupView: View {
             // Each control sits between what its two ends do.
             HStack(spacing: 10) {
                 settingLabel("CFG scale")
+                    .accessibilityHidden(true)
                 hint(t("settings.cfgLow"))
                 Slider(value: $model.cfgScale, in: 1.0...2.0, step: 0.05).frame(width: 200)
+                    .accessibilityLabel("CFG scale")
+                    .accessibilityValue(String(format: "%.2f", model.cfgScale))
                 hint(t("settings.cfgHigh"))
                 Text(String(format: "%.2f", model.cfgScale)).monospacedDigit().padding(.leading, 6)
+                    .accessibilityHidden(true)
             }
             HStack(spacing: 10) {
                 settingLabel(t("settings.margin"))
+                    .accessibilityHidden(true)
                 hint(t("settings.faster"))
-                Button { model.marginMs = max(5, model.marginMs - 5) } label: { Image(systemName: "minus") }
-                    .buttonStyle(HaruButtonStyle())
                 Text("\(Int(model.marginMs)) ms").monospacedDigit().frame(width: 52)
-                Button { model.marginMs = min(40, model.marginMs + 5) } label: { Image(systemName: "plus") }
-                    .buttonStyle(HaruButtonStyle())
+                    .accessibilityHidden(true)
+                Stepper(t("settings.margin"), value: $model.marginMs, in: 5...40, step: 5)
+                    .labelsHidden()
+                    .accessibilityValue("\(Int(model.marginMs)) ms")
                 hint(t("settings.steadier"))
             }
             HStack(spacing: 10) {
@@ -453,6 +453,7 @@ struct SetupView: View {
     private var deviceAdvice: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "headphones").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(t("devices.title")).font(.system(size: 13, weight: .semibold))
                 Text(t("devices.body"))

@@ -6,19 +6,9 @@ import os
 import numpy as np
 import pytest
 
-pytestmark = [
-    pytest.mark.gpu,
-    pytest.mark.skipif(not os.environ.get("HARU_MODEL"), reason="set HARU_MODEL to a checkpoint"),
-]
+pytestmark = pytest.mark.gpu
 
 FRAME = 3200
-
-
-@pytest.fixture(scope="module")
-def model():
-    from haru import HaruModel
-
-    return HaruModel.from_pretrained(os.environ["HARU_MODEL"])
 
 
 def voice(seconds: float = 4.0) -> np.ndarray:

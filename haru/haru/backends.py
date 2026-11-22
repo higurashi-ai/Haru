@@ -110,15 +110,17 @@ class LocalBackend:
         warmup_frames: int = 16,
         codec_backend: str = "torch",
         codec_num_stages: int | None = None,
+        lm_backend: str = "torch",
     ):
         """``model``: a checkpoint directory or a Hugging Face repository id.
 
-        ``codec_backend`` / ``codec_num_stages``: as in :class:`DuplexConfig`."""
+        ``codec_backend`` / ``codec_num_stages`` / ``lm_backend``: as in :class:`DuplexConfig`."""
         self.model_path = model
         self.device = device
         self.warmup_frames = warmup_frames
         self.codec_backend = codec_backend
         self.codec_num_stages = codec_num_stages
+        self.lm_backend = lm_backend
         self.model = None
         self._ready = False
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="haru-model")
@@ -150,6 +152,7 @@ class LocalBackend:
             seed=settings.seed,
             codec_backend=self.codec_backend,
             codec_num_stages=self.codec_num_stages,
+            lm_backend=self.lm_backend,
         )
         return DuplexSession(self.model, settings.system_prompt, settings.reference, config)
 

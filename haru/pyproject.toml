@@ -57,4 +57,6 @@ line-length = 120
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["gpu: needs a checkpoint; set HARU_MODEL to its directory or repository"]
+markers = [
+    "gpu: needs a checkpoint; set HARU_MODEL to its directory or repository. gpu('triton') also needs triton and a CUDA device",
+]

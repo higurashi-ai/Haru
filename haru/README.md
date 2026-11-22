@@ -8,7 +8,7 @@ a web demo server and an offline inference command.
 ```bash
 pip install -e .                  # from this directory
 pip install -e ".[webrtc]"        # + WebRTC transport for the web demo
-pip install -e ".[triton]"        # + faster audio codec on NVIDIA GPUs
+pip install -e ".[triton]"        # + faster audio codec and language model step on NVIDIA GPUs
 pip install -e ".[share]"         # + public link for the web demo (--share)
 ```
 
@@ -21,7 +21,7 @@ Requirements: Python 3.10 or later and a CUDA GPU with about 12 GB of memory.
 `ffmpeg` on the `PATH` is needed to use voice clips recorded in the browser
 (WebM / MP4); WAV, FLAC and Ogg files work without it.
 
-## Faster audio codec
+## Triton backends
 
 With the `triton` extra, the codec can run as Triton kernels replayed from
 CUDA graphs: about 0.7 ms instead of 6 ms per encoded or decoded frame on a
@@ -35,6 +35,9 @@ From the command line: `haru-server --codec-backend triton` (or `auto`: Triton w
 
 The first use in a new environment compiles the kernels (about 15 seconds).
 
+Enable the Triton language model with `--lm-backend triton` or `DuplexConfig(lm_backend="triton")`.
+On a DGX Spark with the Triton codec, this reduced median frame time from 68 ms to 49 ms.
+
 ## Layout
 
 | Module | Contents |
@@ -43,6 +46,7 @@ The first use in a new environment compiles the kernels (about 15 seconds).
 | `haru.models.meanflow_head` | `MeanFlowHead`: one audio latent from one hidden state |
 | `haru.models.vibevoice_codec` | `VibeVoiceCodec`: streaming audio encoder and decoder |
 | `haru.codec_triton` | The same codec as Triton kernels replayed from CUDA graphs |
+| `haru.lm_triton` | Triton kernels for the language model and audio head |
 | `haru.session` | `DuplexSession`: a live conversation, one frame at a time |
 | `haru.prompt` | Character cards and the prompt layout |
 | `haru.sampling` | Text sampling, repetition penalty, incremental detokenization |

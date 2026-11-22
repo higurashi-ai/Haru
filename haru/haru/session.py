@@ -21,12 +21,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .models.haru import HaruModel
+from .models.haru import HaruModel, open_lm_stream
 from .models.vibevoice_codec import open_stream
 from .prompt import build_prompt
 from .sampling import DryConfig, DryState, StreamDetokenizer, sample_token
-
-_PREFILL_CHUNK = 512
 
 
 @dataclass
@@ -43,6 +41,7 @@ class DuplexConfig:
     seed: int | None = None
     codec_backend: str = "torch"  # "torch", "triton" (faster; needs the triton package) or "auto"
     codec_num_stages: int | None = None  # pipeline depth of the Triton codec (1-3); None: the deepest that fits
+    lm_backend: str = "torch"
 
 
 @dataclass
@@ -82,7 +81,7 @@ class DuplexSession:
         self.index = 0
         self.prompt_length = 0
         self._generator = torch.Generator(device=model.device)
-        self._cache = None
+        self._lm = open_lm_stream(model, self.config.lm_backend, self.config.guidance_scale)
         self._codec = open_stream(
             model.codec, backend=self.config.codec_backend, num_stages=self.config.codec_num_stages
         )
@@ -104,24 +103,13 @@ class DuplexSession:
         else:
             self._generator.manual_seed(cfg.seed)
         self._codec.reset()
-        self._cache = model.new_cache()
 
         prompt = build_prompt(
             model.config, model.codec, model.tokenizer, self.system_prompt, self.reference, cfg.speak_first, self._generator
         )
         self._force_text = 1 if cfg.speak_first else 0
-        n = prompt.length
-
-        hidden = None
-        for s in range(0, n, _PREFILL_CHUNK):
-            e = min(n, s + _PREFILL_CHUNK)
-            span = slice(s, e)
-            embeddings = model.embed(
-                prompt.tokens[None, span], prompt.model_latents[None, span], prompt.user_latents[None, span],
-                prompt.model_mask[None, span], prompt.user_mask[None, span],
-            )
-            hidden = model(embeddings, self._cache)[:, -1]
-        self.prompt_length = n
+        hidden = self._lm.prefill(prompt)
+        self.prompt_length = prompt.length
         self.index = 0
         return self._emit(hidden, started)
 
@@ -138,14 +126,12 @@ class DuplexSession:
         if audio.shape[1] != self.frame_samples:
             raise ValueError(f"a user frame is {self.frame_samples} samples, got {audio.shape[1]}")
         user_latent = model.codec.sample(self._codec.encode(audio), self._generator).float()
-        embeddings = model.embed(self._token[None], self._latent[None], user_latent)
-        hidden = model(embeddings, self._cache)[:, -1]
-        return self._emit(hidden, started)
+        return self._emit(self._lm.step(self._token, self._latent, user_latent), started)
 
     def _emit(self, hidden: torch.Tensor, started: float) -> Frame:
         """Sample the next frame's text token and audio from ``hidden [1, H]``."""
         model, cfg = self.model, self.config
-        logits = model.logits(hidden)
+        logits = self._lm.logits(hidden)
         if self._dry is not None:
             self._dry.apply(logits[0])
         logits[:, self._stream_ids] = model.logits_fp32(hidden, self._stream_ids)
@@ -159,7 +145,7 @@ class DuplexSession:
         noise = torch.randn(
             1, model.config.latent_dim, device=hidden.device, dtype=model.dtype, generator=self._generator
         )
-        latent = model.unscale_latents(model.head.sample(hidden, noise, cfg.guidance_scale))
+        latent = self._lm.latent(hidden, noise)
         audio = self._codec.decode(latent[None])[0].float().clamp(-1.0, 1.0)
 
         self._token, self._latent = token, latent

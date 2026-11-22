@@ -84,6 +84,7 @@ def test_duplex_config_has_the_same_fields_and_defaults(torch_package):
     reference = fields(torch_package / "session.py", "DuplexConfig")
     reference.pop("codec_backend", None)  # selects between the PyTorch codec implementations
     reference.pop("codec_num_stages", None)  # tunes the Triton codec
+    reference.pop("lm_backend", None)  # selects between the PyTorch language model implementations
     assert fields(MLX / "frames.py", "DuplexConfig") == reference
 
 

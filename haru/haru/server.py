@@ -598,6 +598,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="pipeline depth of the Triton convolutions (default: per convolution, the deepest of 3-1 that fits)",
     )
     parser.add_argument(
+        "--lm-backend", choices=("torch", "triton", "auto"), default="torch",
+        help="frame inference backend (auto selects Triton when available for a bfloat16 model on CUDA)",
+    )
+    parser.add_argument(
         "--network-profile", choices=sorted(NETWORK_PROFILES), default="internet",
         help="buffering between browser and server: 'local' (same machine or LAN) keeps thinner buffers",
     )
@@ -636,7 +640,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         backend = LocalBackend(
             args.model or args.hf_repo or DEFAULT_REPO, args.device, args.warmup_frames,
-            codec_backend=args.codec_backend, codec_num_stages=args.codec_num_stages,
+            codec_backend=args.codec_backend, codec_num_stages=args.codec_num_stages, lm_backend=args.lm_backend,
         )
     if args.webrtc == "on" and webrtc is None:
         parser.error('--webrtc on needs the optional dependencies: pip install -e "./haru[webrtc]" from the repository')

@@ -1,7 +1,6 @@
 """Triton codec backend: availability probing, and parity with the PyTorch ``CodecStream`` on a real checkpoint
 (``HARU_MODEL=/path/to/Haru-4B pytest -m gpu tests/test_codec_triton.py``)."""
 
-import os
 import threading
 from importlib.util import find_spec
 
@@ -11,17 +10,6 @@ import torch
 from haru import codec_triton
 
 FRAME = 3200
-
-
-def gpu(test):
-    """Mark a test that needs a checkpoint, triton and a CUDA device."""
-    for mark in (
-        pytest.mark.skipif(not codec_triton.is_available(), reason="needs triton and a CUDA device"),
-        pytest.mark.skipif(not os.environ.get("HARU_MODEL"), reason="set HARU_MODEL to a checkpoint"),
-        pytest.mark.gpu,
-    ):
-        test = mark(test)
-    return test
 
 
 def test_is_available_reports_missing_requirements(monkeypatch):
@@ -74,10 +62,8 @@ def test_open_stream_rejects_unknown_backend():
 
 
 @pytest.fixture(scope="module")
-def codec():
-    from haru import HaruModel
-
-    return HaruModel.from_pretrained(os.environ["HARU_MODEL"], device="cuda").codec
+def codec(model):
+    return model.codec
 
 
 def voice(frames: int, seed: int) -> torch.Tensor:
@@ -115,7 +101,7 @@ def run_both(codec, audio: torch.Tensor, reset: tuple[int, list[int]] | None = N
     return [torch.cat(collected, dim=1) for collected in outputs]
 
 
-@gpu
+@pytest.mark.gpu("triton")
 @pytest.mark.parametrize("batch", [1, 4])
 def test_matches_torch_stream(codec, batch):
     """Rows start at different points of the signal; with several rows, one is reset mid-stream."""
@@ -129,7 +115,7 @@ def test_matches_torch_stream(codec, batch):
     assert snr_db(wave, triton_wave) > 30
 
 
-@gpu
+@pytest.mark.gpu("triton")
 @pytest.mark.parametrize("num_stages", [1, 2])
 def test_explicit_pipeline_depth_matches_torch_stream(codec, num_stages):
     frames = 20
@@ -138,13 +124,13 @@ def test_explicit_pipeline_depth_matches_torch_stream(codec, num_stages):
     assert snr_db(wave, triton_wave) > 30
 
 
-@gpu
+@pytest.mark.gpu("triton")
 def test_invalid_pipeline_depth_raises(codec):
     with pytest.raises(ValueError):
         codec_triton.TritonCodecStream(codec, num_stages=4)
 
 
-@gpu
+@pytest.mark.gpu("triton")
 def test_row_reset_equals_fresh_stream(codec):
     audio = torch.stack([voice(12, seed) for seed in range(3)])
     stream = codec_triton.TritonCodecStream(codec, 3)
@@ -160,7 +146,7 @@ def test_row_reset_equals_fresh_stream(codec):
     assert torch.equal(stream.encode(tail), fresh_means)
 
 
-@gpu
+@pytest.mark.gpu("triton")
 def test_several_frames_per_call_equal_single_frames(codec):
     audio = voice(5, 0)[None]
     whole, single = codec_triton.TritonCodecStream(codec), codec_triton.TritonCodecStream(codec)
@@ -173,7 +159,7 @@ def test_several_frames_per_call_equal_single_frames(codec):
         whole.encode(torch.zeros(2, FRAME))
 
 
-@gpu
+@pytest.mark.gpu("triton")
 def test_usable_from_another_thread(codec):
     audio = voice(2, 0)[None]
     stream = codec_triton.TritonCodecStream(codec)

@@ -47,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--codec-num-stages", type=int, choices=(1, 2, 3),
         help="pipeline depth of the Triton convolutions (default: per convolution, the deepest of 3-1 that fits)",
     )
+    parser.add_argument(
+        "--lm-backend", choices=("torch", "triton", "auto"), default="torch",
+        help="frame inference backend (auto selects Triton when available for a bfloat16 model on CUDA)",
+    )
     return parser
 
 
@@ -73,6 +77,7 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
         codec_backend=args.codec_backend,
         codec_num_stages=args.codec_num_stages,
+        lm_backend=args.lm_backend,
     )
     session = DuplexSession(model, system_prompt, reference, config)
 
